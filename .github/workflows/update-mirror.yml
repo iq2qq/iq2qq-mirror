@@ -1,0 +1,120 @@
+name: Update Substack Mirror
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # every 2 hours
+  workflow_dispatch:         # lets you trigger it manually any time
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install rss-parser marked
+
+      - name: Fetch feed & generate static pages
+        run: |
+          node << 'EOF'
+          const Parser = require('rss-parser');
+          const fs = require('fs');
+          const { marked } = require('marked');
+          const parser = new Parser();
+
+          (async () => {
+            const feed = await parser.parseURL('https://www.iq2qq.com/feed');
+            
+            // Create folders
+            if (!fs.existsSync('posts')) fs.mkdirSync('posts');
+            if (!fs.existsSync('public')) fs.mkdirSync('public');
+
+            // Generate index.html
+            let index = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Mirror – Static Archive</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+    h1 { margin-bottom: 0.2rem; }
+    .post { margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1.5rem; }
+    a { color: #0066cc; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .date { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>The Mirror</h1>
+  <p>Independent static archive of <a href="https://www.iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
+  <hr>
+`;
+
+            for (const item of feed.items) {
+              const slug = item.link.split('/').pop() || item.guid;
+              const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+              const date = new Date(item.pubDate).toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+              
+              // Simple HTML page for each post
+              const content = item['content:encoded'] || item.content || item.summary || '';
+              const htmlContent = marked.parse(content);
+              
+              const postHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${item.title}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; }
+    img { max-width: 100%; height: auto; }
+    a { color: #0066cc; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Back to archive</a></p>
+  <h1>${item.title}</h1>
+  <p class="date">${date}</p>
+  ${htmlContent}
+  <hr>
+  <p><small>Original: <a href="${item.link}">${item.link}</a></small></p>
+</body>
+</html>`;
+
+              fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
+              
+              index += `
+  <div class="post">
+    <h2><a href="/posts/${safeSlug}.html">${item.title}</a></h2>
+    <div class="date">${date}</div>
+  </div>`;
+            }
+
+            index += `
+  <p style="margin-top:3rem;color:#666;font-size:0.9rem;">
+    Last updated: ${new Date().toUTCString()}<br>
+    Powered by GitHub Actions + Cloudflare Pages
+  </p>
+</body>
+</html>`;
+
+            fs.writeFileSync('public/index.html', index);
+            // Also copy posts into public for serving
+            fs.cpSync('posts', 'public/posts', { recursive: true });
+            
+            console.log(`Generated ${feed.items.length} posts`);
+          })();
+          EOF
+
+      - name: Commit & push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/ posts/ || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update mirror from Substack feed" && git push)
