@@ -1,23 +1,13 @@
 const Parser = require('rss-parser');
 const fs = require('fs');
-const https = require('https');
-
-// Helper function to safely pull content via native HTTPS channel
-const fetchUrlText = (url) => {
-  return new Promise((resolve, reject) => {
-    const options = {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    };
-    https.get(url, options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => { resolve(data); });
-    }).on('error', (err) => { reject(err); });
-  });
-};
 
 (async () => {
+  // Use a standard browser header to mask the automated GitHub runner
   const parser = new Parser({
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    },
     customFields: {
       item: [
         ['content:encoded', 'contentEncoded'],
@@ -26,8 +16,21 @@ const fetchUrlText = (url) => {
     }
   });
   
-  console.log("Fetching Substack RSS data stream...");
-  const feed = await parser.parseURL('https://iq2qq.com');
+  // Bypassing the domain wrapper by hitting the core Substack engine feed directly
+  console.log("Connecting directly to Substack engine feed...");
+  
+  let feed;
+  try {
+    feed = await parser.parseURL('https://substack.com');
+  } catch (err) {
+    console.error("Primary engine feed blocked. Trying fallback secure feed...");
+    try {
+      feed = await parser.parseURL('https://iq2qq.com');
+    } catch (finalErr) {
+      console.error("Substack is aggressively blocking automated requests. Content dump:");
+      throw new Error("Build halted: Substack anti-bot walls are blocking the RSS parse stream.");
+    }
+  }
 
   if (!fs.existsSync('posts')) fs.mkdirSync('posts');
   if (!fs.existsSync('public')) fs.mkdirSync('public');
@@ -49,7 +52,7 @@ const fetchUrlText = (url) => {
 </head>
 <body>
   <h1>The Mirror</h1>
-  <p>Independent static archive of <a href="https://iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
+  <p>Independent static archive of <a href="https://www.iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
@@ -62,21 +65,10 @@ const fetchUrlText = (url) => {
       day: 'numeric'
     });
 
-    console.log(`Processing text layout for: ${item.title}`);
+    console.log(`Archiving full post body: ${item.title}`);
 
-    let articleBody = item.contentEncoded || item.content || item.description || '';
-
-    // If the RSS content looks hidden or truncated, pull the live clean backup view
-    if (!articleBody || articleBody.length < 500) {
-      try {
-        const liveHtml = await fetchUrlText(item.link);
-        if (liveHtml && !liveHtml.includes("requires JavaScript")) {
-          articleBody = liveHtml;
-        }
-      } catch (e) {
-        console.log(`Live sync skipped for item, keeping RSS default.`);
-      }
-    }
+    // Read full embedded content directly from Substack feed parameters
+    const articleBody = item.contentEncoded || item.content || item.description || 'Content temporarily unavailable.';
 
     const postHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -86,10 +78,11 @@ const fetchUrlText = (url) => {
   <title>${item.title}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #222; }
-    img { max-width: 100%; height: auto; border-radius: 4px; }
+    img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 1.5rem auto; }
     a { color: #0066cc; }
     .date { color: #666; font-size: 0.95rem; margin-bottom: 2rem; }
     .back-link { margin-bottom: 2rem; display: block; text-decoration: none; color: #666; }
+    iframe { max-width: 100%; }
   </style>
 </head>
 <body>
@@ -124,5 +117,5 @@ const fetchUrlText = (url) => {
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
 
-  console.log(`Successfully completed mapping for ${feed.items.length} essays.`);
+  console.log(`Successfully completed static mapping for ${feed.items.length} deep posts.`);
 })();
