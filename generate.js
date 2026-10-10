@@ -1,5 +1,20 @@
 const Parser = require('rss-parser');
 const fs = require('fs');
+const https = require('https');
+
+// Helper function to safely pull content via native HTTPS channel
+const fetchUrlText = (url) => {
+  return new Promise((resolve, reject) => {
+    const options = {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    };
+    https.get(url, options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => { resolve(data); });
+    }).on('error', (err) => { reject(err); });
+  });
+};
 
 (async () => {
   const parser = new Parser({
@@ -49,8 +64,19 @@ const fs = require('fs');
 
     console.log(`Processing text layout for: ${item.title}`);
 
-    // Extract raw embedded HTML payload directly from Substack feed data stream
-    const articleBody = item.contentEncoded || item.content || item.description || 'Content unavailable.';
+    let articleBody = item.contentEncoded || item.content || item.description || '';
+
+    // If the RSS content looks hidden or truncated, pull the live clean backup view
+    if (!articleBody || articleBody.length < 500) {
+      try {
+        const liveHtml = await fetchUrlText(item.link);
+        if (liveHtml && !liveHtml.includes("requires JavaScript")) {
+          articleBody = liveHtml;
+        }
+      } catch (e) {
+        console.log(`Live sync skipped for item, keeping RSS default.`);
+      }
+    }
 
     const postHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -78,10 +104,8 @@ const fs = require('fs');
 </body>
 </html>`;
 
-    // Save physical file
     fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
 
-    // Build homepage structure links
     index += `
   <div class="post">
     <h2><a href="/posts/${safeSlug}.html">${item.title}</a></h2>
@@ -100,5 +124,5 @@ const fs = require('fs');
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
 
-  console.log(`Successfully completed structural mapping for ${feed.items.length} essays.`);
+  console.log(`Successfully completed mapping for ${feed.items.length} essays.`);
 })();
