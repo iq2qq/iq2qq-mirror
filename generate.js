@@ -6,7 +6,6 @@ const path = require('path');
   const publicDir = 'public';
   const targetPublicPostsDir = path.join(publicDir, 'posts');
 
-  // Ensure deployment paths exist
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir);
   if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
@@ -28,43 +27,62 @@ const path = require('path');
 </head>
 <body>
   <h1>The Mirror</h1>
-  <p>Independent static archive of <a href="https://iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
+  <p>Independent static archive of <a href="https://www.iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  // Read all manually uploaded posts from the directory
   const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
 
   if (files.length > 0) {
-    // Sort files by creation or modification time so newer posts appear first
-    const sortedFiles = files.map(file => {
+    const parsedPosts = [];
+
+    for (const file of files) {
       const filePath = path.join(postsDir, file);
-      const stat = fs.statSync(filePath);
-      return { file, mtime: stat.mtime };
-    }).sort((a, b) => b.mtime - a.mtime);
+      const htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-    console.log(`Building homepage layouts for ${sortedFiles.length} uploaded essays...`);
+      // 1. Try to extract the real title from the HTML metadata
+      let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
+      }
 
-    for (const item of sortedFiles) {
-      const filename = item.file;
-      const cleanName = filename.replace('.html', '');
-      
-      // Capitalize slug words to create a readable title link
-      const title = cleanName
-        .split('-')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+      // 2. Extract the actual Substack publication date from the embedded metadata string
+      let pubDate = new Date(0); 
+      const dateMatch = htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i) || htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i);
+      if (dateMatch && dateMatch[1]) {
+        pubDate = new Date(dateMatch[1]);
+      } else {
+        const fileStat = fs.statSync(filePath);
+        pubDate = fileStat.birthtime || fileStat.mtime;
+      }
+
+      parsedPosts.push({ file, title, pubDate });
+    }
+
+    // 3. Sort strictly by real publication date (Newest posts on top)
+    parsedPosts.sort((a, b) => b.pubDate - a.pubDate);
+
+    console.log(`Sorting and formatting ${parsedPosts.length} archive entries...`);
+
+    for (const post of parsedPosts) {
+      const displayDate = post.pubDate.getTime() === 0 ? "Archive Entry" : post.pubDate.toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
 
       index += `
   <div class="post">
-    <h2><a href="/posts/${filename}">${title}</a></h2>
+    <h2><a href="/posts/${post.file}">${post.title}</a></h2>
+    <div class="date">${displayDate}</div>
   </div>`;
     }
   } else {
     index += `
     <div style="background: #fdfdfd; padding: 2rem; border: 1px dashed #ccc; text-align: center; border-radius: 4px; color: #666;">
       <h3>Your Mirror Archive is Ready</h3>
-      <p>Drag and drop your exported Substack HTML files into the <strong>posts</strong> folder on GitHub to populate this list.</p>
+      <p>Uploaded posts will populate here.</p>
     </div>`;
   }
 
@@ -78,10 +96,9 @@ const path = require('path');
 
   fs.writeFileSync('public/index.html', index);
   
-  // Sync your posts into the public web root folder
   if (fs.existsSync(postsDir)) {
     fs.cpSync(postsDir, targetPublicPostsDir, { recursive: true });
   }
 
-  console.log("Homepage generation successfully mapped.");
+  console.log("Homepage generation successfully mapped with chronological sorting.");
 })();
