@@ -40,34 +40,32 @@ const path = require('path');
       const filePath = path.join(postsDir, file);
       const htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // 1. Extract clean Title text from html title attributes
+      // 1. Extract the clean title text from HTML title tags
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
         title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
       }
 
-      // 2. Extract actual Substack date from hidden structured markup metadata
+      // 2. Extract publication date directly from the Substack export filename prefix (YYYY-MM-DD)
       let pubDate = null;
+      const fileNameDateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
       
-      // Check for ISO strings inside standard header variables
-      const schemaMatch = htmlContent.match(/"datePublished"\s*:\s*"([^"]+)"/i) || 
-                          htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i) ||
-                          htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i);
-                          
-      if (schemaMatch && schemaMatch[1]) {
-        pubDate = new Date(schemaMatch[1]);
+      if (fileNameDateMatch && fileNameDateMatch[1]) {
+        pubDate = new Date(fileNameDateMatch[1]);
       }
 
-      // If metadata isn't caught, try parsing a general timestamp match inside scripts
+      // Fallback 1: Look inside internal JSON metadata strings
       if (!pubDate || isNaN(pubDate.getTime())) {
-        const fallbackMatch = htmlContent.match(/"post_date"\s*:\s*"([^"]+)"/i);
-        if (fallbackMatch && fallbackMatch[1]) {
-          pubDate = new Date(fallbackMatch[1]);
+        const schemaMatch = htmlContent.match(/"datePublished"\s*:\s*"([^"]+)"/i) || 
+                            htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i) ||
+                            htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i);
+        if (schemaMatch && schemaMatch[1]) {
+          pubDate = new Date(schemaMatch[1]);
         }
       }
 
-      // Final fail-safe baseline if no text structures exist
+      // Fallback 2: Direct file metadata properties
       if (!pubDate || isNaN(pubDate.getTime())) {
         const fileStat = fs.statSync(filePath);
         pubDate = fileStat.birthtime || fileStat.mtime;
@@ -76,10 +74,10 @@ const path = require('path');
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // 3. Sort strictly by real publication datetime values (Newest items explicitly forced on top)
+    // 3. Sort strictly by real publication datetime values (Newest items at the top)
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
-    console.log(`Successfully mapped and ordered ${parsedPosts.length} post layouts chronologically.`);
+    console.log(`Sorting and formatting ${parsedPosts.length} archive entries...`);
 
     for (const post of parsedPosts) {
       const displayDate = post.pubDate.toLocaleDateString('en-GB', {
@@ -116,5 +114,5 @@ const path = require('path');
     fs.cpSync(postsDir, targetPublicPostsDir, { recursive: true });
   }
 
-  console.log("Homepage generation successfully mapped with fixed internal content chronological sorting.");
+  console.log("Homepage generation successfully completed via filename parsing.");
 })();
