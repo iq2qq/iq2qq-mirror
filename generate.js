@@ -1,11 +1,15 @@
+
 const Parser = require('rss-parser');
 const fs = require('fs');
-const { marked } = require('marked');
 
 (async () => {
   const parser = new Parser();
+  
+  // 1. Fetch your Substack RSS index feed
+  console.log("Fetching Substack RSS feed items...");
   const feed = await parser.parseURL('https://www.iq2qq.com/feed');
 
+  // Ensure deployment directories exist
   if (!fs.existsSync('posts')) fs.mkdirSync('posts');
   if (!fs.existsSync('public')) fs.mkdirSync('public');
 
@@ -30,6 +34,7 @@ const { marked } = require('marked');
   <hr>
 `;
 
+  // 2. Loop through every single post in your archive feed
   for (const item of feed.items) {
     const slug = item.link.split('/').pop() || item.guid;
     const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
@@ -39,33 +44,30 @@ const { marked } = require('marked');
       day: 'numeric'
     });
 
-    const content = item['content:encoded'] || item.content || item.summary || '';
-    const htmlContent = marked.parse(content);
+    console.log(`Archiving full post content: ${item.title}`);
 
-    const postHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${item.title}</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; }
-    img { max-width: 100%; height: auto; }
-    a { color: #0066cc; }
-  </style>
-</head>
-<body>
-  <p><a href="/">← Back to archive</a></p>
-  <h1>${item.title}</h1>
-  <p class="date">${date}</p>
-  ${htmlContent}
-  <hr>
-  <p><small>Original: <a href="${item.link}">${item.link}</a></small></p>
-</body>
-</html>`;
+    let postHtml = '';
+    try {
+      // 3. Instead of parsing snippet feeds, physically fetch the live post page
+      const response = await fetch(item.link, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      const webPageContent = await response.text();
+      
+      // Keep the complete pristine web page layout if fetched successfully
+      postHtml = webPageContent;
+    } catch (error) {
+      console.error(`Failed live fetch for "${item.title}". Falling back to text generation.`, error);
+      
+      // Emergency fallback if your individual page cannot be reached
+      const summaryContent = item['content:encoded'] || item.content || item.summary || '';
+      postHtml = `<!DOCTYPE html><html><head><title>${item.title}</title></head><body><p><a href="/">← Back</a></p><h1>${item.title}</h1>${summaryContent}</body></html>`;
+    }
 
+    // Save individual file to disk
     fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
 
+    // Append to index list
     index += `
   <div class="post">
     <h2><a href="/posts/${safeSlug}.html">${item.title}</a></h2>
@@ -81,8 +83,9 @@ const { marked } = require('marked');
 </body>
 </html>`;
 
+  // Save changes
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
 
-  console.log(`Generated ${feed.items.length} posts`);
+  console.log(`Successfully compiled archive deployment: Generated ${feed.items.length} deep posts.`);
 })();
