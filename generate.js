@@ -27,7 +27,7 @@ const path = require('path');
 </head>
 <body>
   <h1>The Mirror</h1>
-  <p>Independent static archive of <a href="https://www.iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
+  <p>Independent static archive of <a href="https://iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
@@ -40,19 +40,35 @@ const path = require('path');
       const filePath = path.join(postsDir, file);
       const htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // 1. Try to extract the real title from the HTML metadata
+      // 1. Extract clean Title text from html title attributes
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
         title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
       }
 
-      // 2. Extract the actual Substack publication date from the embedded metadata string
-      let pubDate = new Date(0); 
-      const dateMatch = htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i) || htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i);
-      if (dateMatch && dateMatch[1]) {
-        pubDate = new Date(dateMatch[1]);
-      } else {
+      // 2. Extract actual Substack date from hidden structured markup metadata
+      let pubDate = null;
+      
+      // Check for ISO strings inside standard header variables
+      const schemaMatch = htmlContent.match(/"datePublished"\s*:\s*"([^"]+)"/i) || 
+                          htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i) ||
+                          htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i);
+                          
+      if (schemaMatch && schemaMatch[1]) {
+        pubDate = new Date(schemaMatch[1]);
+      }
+
+      // If metadata isn't caught, try parsing a general timestamp match inside scripts
+      if (!pubDate || isNaN(pubDate.getTime())) {
+        const fallbackMatch = htmlContent.match(/"post_date"\s*:\s*"([^"]+)"/i);
+        if (fallbackMatch && fallbackMatch[1]) {
+          pubDate = new Date(fallbackMatch[1]);
+        }
+      }
+
+      // Final fail-safe baseline if no text structures exist
+      if (!pubDate || isNaN(pubDate.getTime())) {
         const fileStat = fs.statSync(filePath);
         pubDate = fileStat.birthtime || fileStat.mtime;
       }
@@ -60,13 +76,13 @@ const path = require('path');
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // 3. Sort strictly by real publication date (Newest posts on top)
-    parsedPosts.sort((a, b) => b.pubDate - a.pubDate);
+    // 3. Sort strictly by real publication datetime values (Newest items explicitly forced on top)
+    parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
-    console.log(`Sorting and formatting ${parsedPosts.length} archive entries...`);
+    console.log(`Successfully mapped and ordered ${parsedPosts.length} post layouts chronologically.`);
 
     for (const post of parsedPosts) {
-      const displayDate = post.pubDate.getTime() === 0 ? "Archive Entry" : post.pubDate.toLocaleDateString('en-GB', {
+      const displayDate = post.pubDate.toLocaleDateString('en-GB', {
         year: 'numeric',
         month: 'long',
         day: 'numeric'
@@ -100,5 +116,5 @@ const path = require('path');
     fs.cpSync(postsDir, targetPublicPostsDir, { recursive: true });
   }
 
-  console.log("Homepage generation successfully mapped with chronological sorting.");
+  console.log("Homepage generation successfully mapped with fixed internal content chronological sorting.");
 })();
