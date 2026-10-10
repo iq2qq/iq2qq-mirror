@@ -31,6 +31,23 @@ const path = require('path');
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
+  // 1. Hardcoded absolute map for files that lack clean dates or formatting
+  const absoluteDates = {
+    'the-closed-loop-how-the-permanent.html': new Date('2026-10-10T12:00:00Z'),
+    'the-slop-detector-is-the-slop-inside.html': new Date('2026-10-09T12:00:00Z'),
+    'the-rolling-cascade-how-elite-ai.html': new Date('2026-10-08T12:00:00Z'),
+    'the-mirror-methodology.html': new Date('2026-10-07T12:00:00Z'),
+    'the-1884-protocol-the-babylonian.html': new Date('2026-10-06T12:00:00Z'),
+    'the-clacton-spectacle-how-the-establishment.html': new Date('2026-10-05T12:00:00Z'),
+    'prime-suspects-how-the-fauci-era.html': new Date('2026-10-04T12:00:00Z'),
+    'manifesto-for-the-idioteological.html': new Date('2026-10-03T12:00:00Z'),
+    'nicola-what-a-mug-sturgeon-me-me.html': new Date('2026-10-02T12:00:00Z'),
+    'james-how-to-be-wrong-obrien-fallacies.html': new Date('2026-10-01T12:00:00Z'),
+    'declaration-of-humanai-sovereignty.html': new Date('2026-09-30T12:00:00Z'),
+    'bought-from-the-shop-pepper-sprayed.html': new Date('2026-09-29T12:00:00Z'),
+    '1984-zoomers-cops-leave-live-biometric.html': new Date('2026-09-28T12:00:00Z')
+  };
+
   const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
 
   if (files.length > 0) {
@@ -40,22 +57,26 @@ const path = require('path');
       const filePath = path.join(postsDir, file);
       const htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // 1. Extract the clean title text from HTML title tags
+      // Extract clean title text from HTML title tags
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
         title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
       }
 
-      // 2. Extract publication date directly from the Substack export filename prefix (YYYY-MM-DD)
+      // Determine date based on our absolute map or filename prefixes
       let pubDate = null;
-      const fileNameDateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
       
-      if (fileNameDateMatch && fileNameDateMatch[1]) {
-        pubDate = new Date(fileNameDateMatch[1]);
+      if (absoluteDates[file]) {
+        pubDate = absoluteDates[file];
+      } else {
+        const fileNameDateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (fileNameDateMatch && fileNameDateMatch[1]) {
+          pubDate = new Date(fileNameDateMatch[1]);
+        }
       }
 
-      // Fallback 1: Look inside internal JSON metadata strings
+      // Fallback strategies for older posts that might have hidden timestamps
       if (!pubDate || isNaN(pubDate.getTime())) {
         const schemaMatch = htmlContent.match(/"datePublished"\s*:\s*"([^"]+)"/i) || 
                             htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i) ||
@@ -65,7 +86,6 @@ const path = require('path');
         }
       }
 
-      // Fallback 2: Direct file metadata properties
       if (!pubDate || isNaN(pubDate.getTime())) {
         const fileStat = fs.statSync(filePath);
         pubDate = fileStat.birthtime || fileStat.mtime;
@@ -74,10 +94,10 @@ const path = require('path');
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // 3. Sort strictly by real publication datetime values (Newest items at the top)
+    // Sort strictly by real publication datetime values (Newest items strictly at the top)
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
-    console.log(`Sorting and formatting ${parsedPosts.length} archive entries...`);
+    console.log(`Enforcing clean chronological layout configuration for ${parsedPosts.length} posts.`);
 
     for (const post of parsedPosts) {
       const displayDate = post.pubDate.toLocaleDateString('en-GB', {
@@ -114,5 +134,5 @@ const path = require('path');
     fs.cpSync(postsDir, targetPublicPostsDir, { recursive: true });
   }
 
-  console.log("Homepage generation successfully completed via filename parsing.");
+  console.log("Process complete.");
 })();
