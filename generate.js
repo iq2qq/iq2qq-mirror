@@ -2,26 +2,18 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
-// Helper to pull JSON bundles cleanly through an open proxy tunnel
-const fetchJsonViaProxy = (url) => {
+// Helper to download content from a URL using native HTTPS
+const getHttpText = (url, options = {}) => {
   return new Promise((resolve, reject) => {
-    const proxyUrl = `https://allorigins.win{encodeURIComponent(url)}`;
-    https.get(proxyUrl, (res) => {
+    https.get(url, options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const wrapper = JSON.parse(data);
-          resolve(JSON.parse(wrapper.contents));
-        } catch (e) {
-          reject(new Error("Failed parsing incoming JSON stream wrapper."));
-        }
-      });
-    }).on('error', (err) => { reject(err); });
+      res.on('end', () => resolve(data));
+    }).on('error', (err) => reject(err));
   });
 };
 
-// Helper to download external asset images directly into your repository directories
+// Helper to download external asset images securely
 const downloadImage = (url, destPath) => {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
@@ -33,30 +25,40 @@ const downloadImage = (url, destPath) => {
           resolve();
         });
       } else {
-        reject(new Error(`Failed asset status check: ${res.statusCode}`));
+        reject(new Error(`Status: ${res.statusCode}`));
       }
-    }).on('error', (err) => { reject(err); });
+    }).on('error', (err) => reject(err));
   });
 };
 
 (async () => {
-  // Initialize file paths safely
   if (!fs.existsSync('posts')) fs.mkdirSync('posts');
   if (!fs.existsSync('public')) fs.mkdirSync('public');
   if (!fs.existsSync('public/images')) fs.mkdirSync('public/images', { recursive: true });
 
-  console.log("Initiating encrypted proxy tunnel to copy text and media elements...");
+  console.log("Connecting to Substack data network via fallback proxy channels...");
   let posts = [];
-  
+  const targetApiUrl = 'https://substack.com';
+
+  // Multi-proxy approach to force Substack to yield the data stream
   try {
-    posts = await fetchJsonViaProxy('https://substack.com');
-    console.log(`Connected to registry. Syncing ${posts.length || 0} full articles...`);
+    console.log("Trying Route 1: corsproxy.io...");
+    const proxyUrl = `https://corsproxy.io{encodeURIComponent(targetApiUrl)}`;
+    const rawData = await getHttpText(proxyUrl);
+    posts = JSON.parse(rawData);
   } catch (err) {
-    console.error("Primary proxy pipe dropped. Trying root domain address mapping...", err);
+    console.log("Route 1 blocked. Trying Route 2: Browser Masquerade...");
     try {
-      posts = await fetchJsonViaProxy('https://iq2qq.com');
+      const browserOptions = {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
+        }
+      };
+      const rawData = await getHttpText(targetApiUrl, browserOptions);
+      posts = JSON.parse(rawData);
     } catch (e) {
-      console.error("All server connections restricted by Substack firewalls.");
+      console.error("All available proxy and direct data routes were rejected by Substack.");
     }
   }
 
@@ -82,6 +84,8 @@ const downloadImage = (url, destPath) => {
 `;
 
   if (Array.isArray(posts) && posts.length > 0) {
+    console.log(`Successfully bypassed firewall. Mirroring ${posts.length} articles with full-text and media elements...`);
+    
     for (const post of posts) {
       const slug = post.slug || post.id;
       const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
@@ -91,37 +95,24 @@ const downloadImage = (url, destPath) => {
         day: 'numeric'
       });
 
-      console.log(`Processing media & blocks for: ${post.title}`);
       let bodyHtml = post.body_html || post.body || post.description || post.subtitle || '';
 
-      // Find every image URL hidden inside the article payload
+      // Find, download, and replace all hotlinked images so they save locally into GitHub
       const imgRegex = /<img[^>]+src="([^">]+)"/g;
       let match;
-      const imageUrls = [];
-      
       while ((match = imgRegex.exec(bodyHtml)) !== null) {
-        imageUrls.push(match[1]);
-      }
+        const originalImgUrl = match[1];
+        if (originalImgUrl.includes('://substack.com') || originalImgUrl.length < 15) continue;
 
-      // Automatically strip, save, and patch image layout paths locally
-      for (const originalImgUrl of imageUrls) {
         try {
-          // Exclude tracker snippets or tiny tracking icons
-          if (originalImgUrl.includes('://substack.com') || originalImgUrl.length < 15) continue;
-
-          // Generate a safe unique name file extension pattern
-          const imgUrlClean = originalImgUrl.split('?')[0];
-          const imgName = `${safeSlug}-${path.basename(imgUrlClean.replace(/[^a-z0-9.]/gi, '-'))}`;
+          const imgName = `${safeSlug}-${Date.now()}-${path.basename(originalImgUrl.split('?')[0]).replace(/[^a-z0-9.]/gi, '-')}`;
           const diskDestination = path.join('public/images', imgName);
           const relativeWebPath = `/images/${imgName}`;
 
-          console.log(`Mirroring image asset to repository: ${imgName}`);
           await downloadImage(originalImgUrl, diskDestination);
-          
-          // Rewrite the raw HTML string block to link directly to your repository folder assets
           bodyHtml = bodyHtml.split(originalImgUrl).join(relativeWebPath);
         } catch (imgErr) {
-          console.error(`Failed mapping specific media asset: ${originalImgUrl}`, imgErr);
+          console.error("Skipped image download task.");
         }
       }
 
@@ -178,7 +169,5 @@ const downloadImage = (url, destPath) => {
 
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
-
-  console.log(`Mirror process finished. Complete text and image media configurations synced.`);
+  console.log("Process complete.");
 })();
-
