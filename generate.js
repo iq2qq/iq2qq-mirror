@@ -1,15 +1,19 @@
-
 const Parser = require('rss-parser');
 const fs = require('fs');
 
 (async () => {
-  const parser = new Parser();
+  const parser = new Parser({
+    customFields: {
+      item: [
+        ['content:encoded', 'contentEncoded'],
+        ['description', 'description']
+      ]
+    }
+  });
   
-  // 1. Fetch your Substack RSS index feed
-  console.log("Fetching Substack RSS feed items...");
-  const feed = await parser.parseURL('https://www.iq2qq.com/feed');
+  console.log("Fetching Substack RSS data stream...");
+  const feed = await parser.parseURL('https://iq2qq.com');
 
-  // Ensure deployment directories exist
   if (!fs.existsSync('posts')) fs.mkdirSync('posts');
   if (!fs.existsSync('public')) fs.mkdirSync('public');
 
@@ -20,21 +24,20 @@ const fs = require('fs');
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Mirror – Static Archive</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
-    h1 { margin-bottom: 0.2rem; }
-    .post { margin-bottom: 2rem; border-bottom: 1px solid #eee; padding-bottom: 1.5rem; }
-    a { color: #0066cc; text-decoration: none; }
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+    h1 { margin-bottom: 0.2rem; font-size: 2.2rem; }
+    .post { margin-bottom: 2.5rem; border-bottom: 1px solid #eee; padding-bottom: 1.5rem; }
+    a { color: #0066cc; text-decoration: none; font-weight: 600; }
     a:hover { text-decoration: underline; }
-    .date { color: #666; font-size: 0.9rem; }
+    .date { color: #666; font-size: 0.9rem; margin-top: 0.3rem; }
   </style>
 </head>
 <body>
   <h1>The Mirror</h1>
-  <p>Independent static archive of <a href="https://www.iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
-  <hr>
+  <p>Independent static archive of <a href="https://iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
+  <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  // 2. Loop through every single post in your archive feed
   for (const item of feed.items) {
     const slug = item.link.split('/').pop() || item.guid;
     const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
@@ -44,30 +47,41 @@ const fs = require('fs');
       day: 'numeric'
     });
 
-    console.log(`Archiving full post content: ${item.title}`);
+    console.log(`Processing text layout for: ${item.title}`);
 
-    let postHtml = '';
-    try {
-      // 3. Instead of parsing snippet feeds, physically fetch the live post page
-      const response = await fetch(item.link, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-      });
-      const webPageContent = await response.text();
-      
-      // Keep the complete pristine web page layout if fetched successfully
-      postHtml = webPageContent;
-    } catch (error) {
-      console.error(`Failed live fetch for "${item.title}". Falling back to text generation.`, error);
-      
-      // Emergency fallback if your individual page cannot be reached
-      const summaryContent = item['content:encoded'] || item.content || item.summary || '';
-      postHtml = `<!DOCTYPE html><html><head><title>${item.title}</title></head><body><p><a href="/">← Back</a></p><h1>${item.title}</h1>${summaryContent}</body></html>`;
-    }
+    // Extract raw embedded HTML payload directly from Substack feed data stream
+    const articleBody = item.contentEncoded || item.content || item.description || 'Content unavailable.';
 
-    // Save individual file to disk
+    const postHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${item.title}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #222; }
+    img { max-width: 100%; height: auto; border-radius: 4px; }
+    a { color: #0066cc; }
+    .date { color: #666; font-size: 0.95rem; margin-bottom: 2rem; }
+    .back-link { margin-bottom: 2rem; display: block; text-decoration: none; color: #666; }
+  </style>
+</head>
+<body>
+  <a class="back-link" href="/">← Back to archive</a>
+  <h1>${item.title}</h1>
+  <p class="date">${date}</p>
+  <main>
+    ${articleBody}
+  </main>
+  <hr style="border: 0; border-top: 1px solid #eee; margin: 3rem 0;">
+  <p><small>Original Link: <a href="${item.link}" target="_blank">${item.link}</a></small></p>
+</body>
+</html>`;
+
+    // Save physical file
     fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
 
-    // Append to index list
+    // Build homepage structure links
     index += `
   <div class="post">
     <h2><a href="/posts/${safeSlug}.html">${item.title}</a></h2>
@@ -76,16 +90,15 @@ const fs = require('fs');
   }
 
   index += `
-  <p style="margin-top:3rem;color:#666;font-size:0.9rem;">
+  <p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;">
     Last updated: ${new Date().toUTCString()}<br>
     Powered by GitHub Actions + Cloudflare Pages
   </p>
 </body>
 </html>`;
 
-  // Save changes
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
 
-  console.log(`Successfully compiled archive deployment: Generated ${feed.items.length} deep posts.`);
+  console.log(`Successfully completed structural mapping for ${feed.items.length} essays.`);
 })();
