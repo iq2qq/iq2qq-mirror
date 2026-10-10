@@ -31,7 +31,7 @@ const path = require('path');
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  // 1. Hardcoded absolute map for files that lack clean dates or formatting
+  // Explicit hardcoded absolute date structure for tracking order sequences
   const absoluteDates = {
     'the-closed-loop-how-the-permanent.html': new Date('2026-10-10T12:00:00Z'),
     'the-slop-detector-is-the-slop-inside.html': new Date('2026-10-09T12:00:00Z'),
@@ -55,18 +55,24 @@ const path = require('path');
 
     for (const file of files) {
       const filePath = path.join(postsDir, file);
-      const htmlContent = fs.readFileSync(filePath, 'utf-8');
+      let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // Extract clean title text from HTML title tags
+      // --- THE ANTI-HIJACK FILTER: Forcefully strip out all dynamic scripts ---
+      htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+      
+      // Clean up target attribute objects or noscript frame overrides
+      htmlContent = htmlContent.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
+      htmlContent = htmlContent.replace(/id="substack-app"/gi, 'id="clean-archive-root"');
+
+      // Extract the clean title text from HTML title tags
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
       if (titleMatch && titleMatch[1]) {
         title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
       }
 
-      // Determine date based on our absolute map or filename prefixes
+      // Map dates based on absolute registry or fallback patterns
       let pubDate = null;
-      
       if (absoluteDates[file]) {
         pubDate = absoluteDates[file];
       } else {
@@ -76,28 +82,19 @@ const path = require('path');
         }
       }
 
-      // Fallback strategies for older posts that might have hidden timestamps
-      if (!pubDate || isNaN(pubDate.getTime())) {
-        const schemaMatch = htmlContent.match(/"datePublished"\s*:\s*"([^"]+)"/i) || 
-                            htmlContent.match(/datePublished"\s*content="\s*([^"]+)"/i) ||
-                            htmlContent.match(/"pubDate"\s*:\s*"([^"]+)"/i);
-        if (schemaMatch && schemaMatch[1]) {
-          pubDate = new Date(schemaMatch[1]);
-        }
-      }
-
       if (!pubDate || isNaN(pubDate.getTime())) {
         const fileStat = fs.statSync(filePath);
         pubDate = fileStat.birthtime || fileStat.mtime;
       }
 
+      // Save the stripped clean HTML file back down to public folder target trees
+      fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
+
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // Sort strictly by real publication datetime values (Newest items strictly at the top)
+    // Sort strictly by real publication datetime values (Newest items on top)
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
-
-    console.log(`Enforcing clean chronological layout configuration for ${parsedPosts.length} posts.`);
 
     for (const post of parsedPosts) {
       const displayDate = post.pubDate.toLocaleDateString('en-GB', {
@@ -112,12 +109,6 @@ const path = require('path');
     <div class="date">${displayDate}</div>
   </div>`;
     }
-  } else {
-    index += `
-    <div style="background: #fdfdfd; padding: 2rem; border: 1px dashed #ccc; text-align: center; border-radius: 4px; color: #666;">
-      <h3>Your Mirror Archive is Ready</h3>
-      <p>Uploaded posts will populate here.</p>
-    </div>`;
   }
 
   index += `
@@ -129,10 +120,5 @@ const path = require('path');
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  
-  if (fs.existsSync(postsDir)) {
-    fs.cpSync(postsDir, targetPublicPostsDir, { recursive: true });
-  }
-
-  console.log("Process complete.");
+  console.log("Anti-hijack scrubbing and sorting configurations active.");
 })();
