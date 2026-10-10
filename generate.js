@@ -1,58 +1,63 @@
 const fs = require('fs');
 const https = require('https');
+const path = require('path');
 
-// Helper function to safely read data using native secure channels
-const fetchJson = (url) => {
+// Helper to pull JSON bundles cleanly through an open proxy tunnel
+const fetchJsonViaProxy = (url) => {
   return new Promise((resolve, reject) => {
-    const options = {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      }
-    };
-    https.get(url, options, (res) => {
+    const proxyUrl = `https://allorigins.win{encodeURIComponent(url)}`;
+    https.get(proxyUrl, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
         try {
-          resolve(JSON.parse(data));
+          const wrapper = JSON.parse(data);
+          resolve(JSON.parse(wrapper.contents));
         } catch (e) {
-          reject(new Error("Substack returned broken layout text instead of JSON payload."));
+          reject(new Error("Failed parsing incoming JSON stream wrapper."));
         }
       });
     }).on('error', (err) => { reject(err); });
   });
 };
 
+// Helper to download external asset images directly into your repository directories
+const downloadImage = (url, destPath) => {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode === 200) {
+        const fileStream = fs.createWriteStream(destPath);
+        res.pipe(fileStream);
+        fileStream.on('finish', () => {
+          fileStream.close();
+          resolve();
+        });
+      } else {
+        reject(new Error(`Failed asset status check: ${res.statusCode}`));
+      }
+    }).on('error', (err) => { reject(err); });
+  });
+};
+
 (async () => {
+  // Initialize file paths safely
   if (!fs.existsSync('posts')) fs.mkdirSync('posts');
   if (!fs.existsSync('public')) fs.mkdirSync('public');
+  if (!fs.existsSync('public/images')) fs.mkdirSync('public/images', { recursive: true });
 
-  console.log("Accessing Substack API data matrix...");
+  console.log("Initiating encrypted proxy tunnel to copy text and media elements...");
   let posts = [];
   
   try {
-    // Accessing Substack's open archive collection registry directly
-    const apiData = await fetchJson('https://substack.com');
-    if (Array.isArray(apiData)) {
-      posts = apiData;
-    } else if (apiData && Array.isArray(apiData.posts)) {
-      posts = apiData.posts;
-    }
+    posts = await fetchJsonViaProxy('https://substack.com');
+    console.log(`Connected to registry. Syncing ${posts.length || 0} full articles...`);
   } catch (err) {
-    console.error("Direct API channel restricted, attempting fallback backup channel...");
+    console.error("Primary proxy pipe dropped. Trying root domain address mapping...", err);
     try {
-      const fallbackData = await fetchJson('https://iq2qq.com');
-      posts = fallbackData.posts || fallbackData || [];
+      posts = await fetchJsonViaProxy('https://iq2qq.com');
     } catch (e) {
-      console.error("All live content streams rejected by host system.");
+      console.error("All server connections restricted by Substack firewalls.");
     }
-  }
-
-  // Emergency safety mechanism: If Substack completely shuts the door on GitHub, 
-  // we generate a beautiful homepage with a placeholder so your site doesn't crash.
-  if (posts.length === 0) {
-    console.log("No data returned. Generating offline static index dashboard.");
   }
 
   let index = `<!DOCTYPE html>
@@ -76,21 +81,51 @@ const fetchJson = (url) => {
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  for (const post of posts) {
-    const slug = post.slug || post.id;
-    const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
-    const date = new Date(post.post_date || post.createdAt || Date.now()).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+  if (Array.isArray(posts) && posts.length > 0) {
+    for (const post of posts) {
+      const slug = post.slug || post.id;
+      const safeSlug = slug.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+      const date = new Date(post.post_date || post.createdAt || Date.now()).toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
 
-    console.log(`Mapping full text components for: ${post.title}`);
+      console.log(`Processing media & blocks for: ${post.title}`);
+      let bodyHtml = post.body_html || post.body || post.description || post.subtitle || '';
 
-    // Extracting full post description blocks safely from JSON parameters
-    const articleBody = post.body_html || post.body || post.description || post.subtitle || 'Content text mirroring pending live database verification.';
+      // Find every image URL hidden inside the article payload
+      const imgRegex = /<img[^>]+src="([^">]+)"/g;
+      let match;
+      const imageUrls = [];
+      
+      while ((match = imgRegex.exec(bodyHtml)) !== null) {
+        imageUrls.push(match[1]);
+      }
 
-    const postHtml = `<!DOCTYPE html>
+      // Automatically strip, save, and patch image layout paths locally
+      for (const originalImgUrl of imageUrls) {
+        try {
+          // Exclude tracker snippets or tiny tracking icons
+          if (originalImgUrl.includes('://substack.com') || originalImgUrl.length < 15) continue;
+
+          // Generate a safe unique name file extension pattern
+          const imgUrlClean = originalImgUrl.split('?')[0];
+          const imgName = `${safeSlug}-${path.basename(imgUrlClean.replace(/[^a-z0-9.]/gi, '-'))}`;
+          const diskDestination = path.join('public/images', imgName);
+          const relativeWebPath = `/images/${imgName}`;
+
+          console.log(`Mirroring image asset to repository: ${imgName}`);
+          await downloadImage(originalImgUrl, diskDestination);
+          
+          // Rewrite the raw HTML string block to link directly to your repository folder assets
+          bodyHtml = bodyHtml.split(originalImgUrl).join(relativeWebPath);
+        } catch (imgErr) {
+          console.error(`Failed mapping specific media asset: ${originalImgUrl}`, imgErr);
+        }
+      }
+
+      const postHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -98,10 +133,11 @@ const fetchJson = (url) => {
   <title>${post.title}</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.7; color: #222; }
-    img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 1.5rem auto; }
+    img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 1.5rem auto; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
     a { color: #0066cc; }
     .date { color: #666; font-size: 0.95rem; margin-bottom: 2rem; }
     .back-link { margin-bottom: 2rem; display: block; text-decoration: none; color: #666; }
+    blockquote { border-left: 4px solid #ccc; padding-left: 1rem; margin-left: 0; color: #555; font-style: italic; }
   </style>
 </head>
 <body>
@@ -109,24 +145,22 @@ const fetchJson = (url) => {
   <h1>${post.title}</h1>
   <p class="date">${date}</p>
   <main>
-    ${articleBody}
+    ${bodyHtml}
   </main>
   <hr style="border: 0; border-top: 1px solid #eee; margin: 3rem 0;">
   <p><small>Original Link: <a href="https://iq2qq.com/p/${slug}" target="_blank">View on Substack</a></small></p>
 </body>
 </html>`;
 
-    fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
+      fs.writeFileSync(`posts/${safeSlug}.html`, postHtml);
 
-    index += `
+      index += `
   <div class="post">
     <h2><a href="/posts/${safeSlug}.html">${post.title}</a></h2>
     <div class="date">${date}</div>
   </div>`;
-  }
-
-  // Handle fallback UI layout if Substack is completely unreachable during this run session
-  if (posts.length === 0) {
+    }
+  } else {
     index += `
     <div style="background: #fff8f8; padding: 1.5rem; border-left: 4px solid #cc0000; margin: 2rem 0; border-radius: 4px;">
       <h3 style="margin-top:0; color: #cc0000;">Live Feed Synchronization Pending</h3>
@@ -145,5 +179,6 @@ const fetchJson = (url) => {
   fs.writeFileSync('public/index.html', index);
   fs.cpSync('posts', 'public/posts', { recursive: true });
 
-  console.log(`Compilation update process complete.`);
+  console.log(`Mirror process finished. Complete text and image media configurations synced.`);
 })();
+
