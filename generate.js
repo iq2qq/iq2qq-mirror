@@ -91,7 +91,6 @@ function splitCSVLine(line) {
   let csvIdMap = {};
   let csvSlugMap = {};
 
-  // CRITICAL DEPLOYMENT FIX: Reload your hard-earned local CSV mappings
   if (fs.existsSync(csvPath)) {
     const csvContent = fs.readFileSync(csvPath, 'utf-8');
     const records = parseCSV(csvContent);
@@ -144,7 +143,7 @@ function splitCSVLine(line) {
         }
       }
 
-      if (!pubDate || isNaN(pubDate.getTime())) continue; // Ignore drafts entirely
+      if (!pubDate || isNaN(pubDate.getTime())) continue;
 
       // Safe script neutralization
       htmlContent = htmlContent.split('<script').join('<!--<script');
@@ -225,6 +224,7 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("High fidelity formatting layer successfully deployed.");
 })();
+
 
 
 
