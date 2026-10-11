@@ -1,27 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-// Robust text line reader that safely ignores layout breaks inside quoted columns
 function parseCSV(csvText) {
   const records = [];
-  const lines = [];
-  let currentLine = '';
-  let insideQuote = false;
-
-  // Scan every single character to bundle rows cleanly
-  for (let i = 0; i < csvText.length; i++) {
-    const char = csvText[i];
-    if (char === '"') {
-      insideQuote = !insideQuote;
-      currentLine += char;
-    } else if ((char === '\n' || char \(=== '\r'\)) && !insideQuote) {
-      if (currentLine.trim()) lines.push(currentLine.trim());
-      currentLine = '';
-    } else {
-      currentLine += char;
-    }
-  }
-  if (currentLine.trim()) lines.push(currentLine.trim());
+  const lines = csvText.split('\n');
   if (lines.length < 2) return records;
 
   const headers = splitCSVLine(lines[0]);
@@ -31,13 +13,15 @@ function parseCSV(csvText) {
   const slugIdx = headers.findIndex(h => h.toLowerCase().includes('slug'));
 
   for (let i = 1; i < lines.length; i++) {
-    const fields = splitCSVLine(lines[i]);
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const fields = splitCSVLine(line);
     if (fields.length < 2) continue;
 
     const rawTitle = fields[titleIdx] || '';
     const cleanTitle = rawTitle.replace(/^"|"\$/g, '').trim();
 
-    // Skip empty lines or technical Substack configurations that lack titles
     if (!cleanTitle || cleanTitle.length === 0) continue;
 
     records.push({
@@ -125,7 +109,6 @@ function splitCSVLine(line) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // Neutralize scripts safely
       htmlContent = htmlContent.split('<script').join('<!--<script');
       htmlContent = htmlContent.split('</script>').join('</script>-->');
       htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
@@ -168,7 +151,6 @@ function splitCSVLine(line) {
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // Sort valid posts chronologically
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of parsedPosts) {
@@ -197,6 +179,7 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("Process complete.");
 })();
+
 
 
 
