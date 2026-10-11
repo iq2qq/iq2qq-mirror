@@ -1,14 +1,12 @@
-
 const fs = require('fs');
 const path = require('path');
 
-// A robust CSV line reader that correctly processes fields with embedded commas and quotes
+// Simple, clear line splitter with zero complex symbols
 function parseCSV(csvText) {
   const records = [];
-  const lines = csvText.split(\(/\r\)?\n/);
+  const lines = csvText.split('\n');
   if (lines.length < 2) return records;
 
-  // Track field header positions dynamically
   const headers = splitCSVLine(lines[0]);
   const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
   const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
@@ -32,7 +30,6 @@ function parseCSV(csvText) {
   return records;
 }
 
-// Tokenizer that accurately processes quoted fields in CSV formatting specifications
 function splitCSVLine(line) {
   const result = [];
   let insideQuote = false;
@@ -41,7 +38,7 @@ function splitCSVLine(line) {
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     if (char === '"') {
-      insideQuote = !insideQuote; // Toggle quote state
+      insideQuote = !insideQuote;
     } else if (char === ',' && !insideQuote) {
       result.push(currentField.trim());
       currentField = '';
@@ -83,7 +80,6 @@ function splitCSVLine(line) {
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  // Parse your posts.csv file
   const csvPath = 'posts.csv';
   let csvIdMap = {};
   let csvSlugMap = {};
@@ -115,30 +111,24 @@ function splitCSVLine(line) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // Strip dynamic scripts completely to block Substack "Page Not Found" layout hijacking errors
-      htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      htmlContent = htmlContent.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
+      htmlContent = htmlContent.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '');
+      htmlContent = htmlContent.replace(/<noscript\\b[^<]*(?:(?!<\\/noscript>)<[^<]*)*<\\/noscript>/gi, '');
       htmlContent = htmlContent.replace(/id="substack-app"/gi, 'id="clean-archive-root"');
 
-      // Extract titles and dates using multiple fallback layers
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       let pubDate = null;
 
-      // Extract any numeric sequence from the filename to match Substack's Post IDs
-      const idMatch = file.match(/(\d+)/);
+      const idMatch = file.match(/(\\d+)/);
       const fileNumericId = idMatch ? idMatch[1] : null;
       const fileSlugPart = file.replace('.html', '').toLowerCase();
 
       if (fileNumericId && csvIdMap[fileNumericId]) {
-        // Match found using the Substack Post ID column mapping
         title = csvIdMap[fileNumericId].title;
         pubDate = csvIdMap[fileNumericId].date;
       } else if (csvSlugMap[fileSlugPart]) {
-        // Match found using the text slug string mapping
         title = csvSlugMap[fileSlugPart].title;
         pubDate = csvSlugMap[fileSlugPart].date;
       } else {
-        // Fuzzy search backup across both spreadsheet columns
         const matchedIdKey = Object.keys(csvIdMap).find(idKey => file.includes(idKey));
         if (matchedIdKey) {
           title = csvIdMap[matchedIdKey].title;
@@ -146,21 +136,19 @@ function splitCSVLine(line) {
         }
       }
 
-      // Default baseline fallback if the mapping row fails
       if (!pubDate || isNaN(pubDate.getTime())) {
-        const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+        const titleMatch = htmlContent.match(/<title>([^<]+)<\\/title>/i);
         if (titleMatch) {
           title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
         }
-        const datePrefixMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
-        pubDate = datePrefixMatch ? new Date(datePrefixMatch) : fs.statSync(filePath).mtime;
+        const datePrefixMatch = file.match(/^(\\d{4}-\\d{2}-\\d{2})/);
+        pubDate = datePrefixMatch ? new Date(datePrefixMatch[1]) : fs.statSync(filePath).mtime;
       }
 
       fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // Sort all entries strictly by calendar dates (Newest posts directly at the top)
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of parsedPosts) {
@@ -187,5 +175,5 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log(`Successfully mapped index with advanced metadata parsing logic.`);
+  console.log("Process complete.");
 })();
