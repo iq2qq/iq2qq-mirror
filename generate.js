@@ -169,9 +169,6 @@ function splitCSVLine(line) {
   h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
   h2 { font-size: 1.6rem; }
 </style>
-
-<script async src="https://twitter.com" charset="utf-8"></script>
-
 </head>
 <body>
   <div class="archive-header">
@@ -213,8 +210,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("Archive fully restored to safe baseline configuration.");
+  console.log("Safe baseline configuration successfully restored.");
 })();
+
 
 
 
