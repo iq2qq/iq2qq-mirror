@@ -6,7 +6,7 @@ function parseCSV(csvText) {
   const lines = csvText.split('\n');
   if (lines.length < 2) return records;
 
-  const headers = splitCSVLine(lines);
+  const headers = splitCSVLine(lines[0]);
   const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
   const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
   const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
@@ -168,32 +168,9 @@ function splitCSVLine(line) {
   blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
   h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
   h2 { font-size: 1.6rem; }
-  .twitter-tweet { margin: 2.5rem auto !important; }
 </style>
 
 <script async src="https://twitter.com" charset="utf-8"></script>
-
-<!-- The Browser Scan Engine: Corrected string matching sequences to prevent layout breakage -->
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    const links = document.querySelectorAll("a");
-    links.forEach(link => {
-      const href = link.getAttribute("href") || "";
-      if (/twitter\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+/i.test(href) || /x\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+/i.test(href)) {
-        if (!link.closest(".twitter-tweet")) {
-          const wrapper = document.createElement("blockquote");
-          wrapper.className = "twitter-tweet";
-          wrapper.setAttribute("data-align", "center");
-          link.parentNode.insertBefore(wrapper, link);
-          wrapper.appendChild(link);
-        }
-      }
-    });
-    if (window.twttr && window.twttr.widgets) {
-      window.twttr.widgets.load();
-    }
-  });
-</script>
 
 </head>
 <body>
@@ -236,8 +213,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("High fidelity formatting layer successfully deployed.");
+  console.log("Archive fully restored to safe baseline configuration.");
 })();
+
 
 
 
