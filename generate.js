@@ -152,8 +152,6 @@ function splitCSVLine(line) {
       htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
       const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-      
-      // Fixed deep link formatting typo from the original file template sheet
       const originalSourceLink = postSlug ? `https://iq2qq.com{postSlug}` : `https://iq2qq.com`;
 
       // --- STYLING & CORE INFO INJECTION SHEET ---
@@ -175,15 +173,13 @@ function splitCSVLine(line) {
 
 <script async src="https://twitter.com" charset="utf-8"></script>
 
-<!-- The Browser Scan Engine: Transforms plain link structures safely after page load without changing file text -->
+<!-- The Browser Scan Engine: Corrected string matching sequences to prevent layout breakage -->
 <script>
   document.addEventListener("DOMContentLoaded", function() {
-    // Scan exclusively for active anchor links matching status links
     const links = document.querySelectorAll("a");
     links.forEach(link => {
       const href = link.getAttribute("href") || "";
-      if (/twitter\\.com\\/[a-zA-Z0-9_]+\\/status\\/[0-9]+/i.test(href) || /x\\.com\\/[a-zA-Z0-9_]+\/status\\/[0-9]+/i.test(href)) {
-        // Only convert link instances that are not already tucked inside a tweet card wrapper
+      if (/twitter\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+/i.test(href) || /x\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+/i.test(href)) {
         if (!link.closest(".twitter-tweet")) {
           const wrapper = document.createElement("blockquote");
           wrapper.className = "twitter-tweet";
@@ -193,7 +189,6 @@ function splitCSVLine(line) {
         }
       }
     });
-    // Trigger the platform loader execution sequence
     if (window.twttr && window.twttr.widgets) {
       window.twttr.widgets.load();
     }
@@ -243,6 +238,7 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("High fidelity formatting layer successfully deployed.");
 })();
+
 
 
 
