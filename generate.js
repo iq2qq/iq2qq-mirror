@@ -70,18 +70,21 @@ function splitCSVLine(line) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Mirror – Static Archive</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
-    h1 { margin-bottom: 0.2rem; font-size: 2.2rem; }
-    .post { margin-bottom: 2.5rem; border-bottom: 1px solid #eee; padding-bottom: 1.5rem; }
-    a { color: #0066cc; text-decoration: none; font-weight: 600; }
-    a:hover { text-decoration: underline; }
-    .date { color: #666; font-size: 0.9rem; margin-top: 0.3rem; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background-color: #fafafa; }
+    h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #000; }
+    .subtitle { color: #666; font-size: 1.1rem; margin-bottom: 2rem; }
+    .post { margin-bottom: 2rem; background: #fff; padding: 2rem; border: 1px solid #e5e5e5; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+    a { color: #1a1a1a; text-decoration: none; font-weight: 600; }
+    .post h2 a { color: #000; font-size: 1.5rem; font-weight: 700; }
+    .post h2 a:hover { color: #0066cc; }
+    .date { color: #666; font-size: 0.9rem; margin-top: 0.5rem; font-weight: 500; }
+    hr { border: 0; border-top: 1px solid #e5e5e5; margin: 2.5rem 0; }
   </style>
 </head>
 <body>
   <h1>The Mirror</h1>
-  <p>Independent static archive of <a href="https://iq2qq.com">iq2qq.com</a>. Automatically mirrored from Substack.</p>
-  <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
+  <div class="subtitle">Independent static archive of <a href="https://iq2qq.com" style="color:#0066cc;text-decoration:underline;">iq2qq.com</a>. Automatically mirrored from Substack.</div>
+  <hr>
 `;
 
   const csvPath = 'posts.csv';
@@ -89,14 +92,13 @@ function splitCSVLine(line) {
   let csvSlugMap = {};
 
   if (fs.existsSync(csvPath)) {
-    console.log("Loading metadata spreadsheet map...");
     const csvContent = fs.readFileSync(csvPath, 'utf-8');
     const records = parseCSV(csvContent);
     
     records.forEach(rec => {
       const cleanDate = new Date(rec.date);
-      if (rec.id) csvIdMap[rec.id.trim()] = { title: rec.title, date: cleanDate };
-      if (rec.slug) csvSlugMap[rec.slug.trim().toLowerCase()] = { title: rec.title, date: cleanDate };
+      if (rec.id) csvIdMap[rec.id.trim()] = { title: rec.title, date: cleanDate, slug: rec.slug };
+      if (rec.slug) csvSlugMap[rec.slug.trim().toLowerCase()] = { title: rec.title, date: cleanDate, slug: rec.slug };
     });
   }
 
@@ -111,6 +113,7 @@ function splitCSVLine(line) {
 
       let pubDate = null;
       let title = '';
+      let postSlug = '';
 
       let fileNumericId = '';
       for (let i = 0; i < file.length; i++) {
@@ -123,47 +126,74 @@ function splitCSVLine(line) {
 
       const fileSlugPart = file.replace('.html', '').toLowerCase();
 
-      // Check for an exact matching index item within your database rows
       if (fileNumericId && csvIdMap[fileNumericId]) {
         title = csvIdMap[fileNumericId].title;
         pubDate = csvIdMap[fileNumericId].date;
+        postSlug = csvIdMap[fileNumericId].slug;
       } else if (csvSlugMap[fileSlugPart]) {
         title = csvSlugMap[fileSlugPart].title;
         pubDate = csvSlugMap[fileSlugPart].date;
+        postSlug = csvSlugMap[fileSlugPart].slug;
       } else {
         const matchedIdKey = Object.keys(csvIdMap).find(idKey => file.includes(idKey));
         if (matchedIdKey) {
           title = csvIdMap[matchedIdKey].title;
           pubDate = csvIdMap[matchedIdKey].date;
+          postSlug = csvIdMap[matchedIdKey].slug;
         }
       }
 
-      // --- FILTER LOGIC: If the file is not mapped in the CSV rows, it's a draft. SKIP IT entirely! ---
-      if (!pubDate || isNaN(pubDate.getTime())) {
-        console.log(`Filtering out draft/unmapped asset file link: ${file}`);
-        continue;
-      }
+      if (!pubDate || isNaN(pubDate.getTime())) continue; // Ignore drafts entirely
 
-      // Neutralize runtime script elements on verified articles
+      // Safe script neutralization
       htmlContent = htmlContent.split('<script').join('<!--<script');
       htmlContent = htmlContent.split('</script>').join('</script>-->');
       htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
       htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
+      const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+      const originalSourceLink = postSlug ? `https://://iq2qq.com{postSlug}` : `https://iq2qq.com/`;
+
+      // --- STYLING & CORE INFO INJECTION SHEET ---
+      const highFidelityStyles = `
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
+  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 3rem; font-size: 0.95rem; font-weight: 500; }
+  .archive-header a { color: #0066cc; text-decoration: none; }
+  .post-title { font-size: 2.6rem; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 0.5rem; color: #000000; }
+  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 3rem; font-weight: 500; }
+  .post-meta a { color: #0066cc; text-decoration: underline; }
+  img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 2rem auto; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+  p { margin-bottom: 1.5rem; font-size: 1.1rem; }
+  blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
+  h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
+  h2 { font-size: 1.6rem; }
+</style>
+</head>
+<body>
+  <div class="archive-header">
+    <a href="/">← Back to Archive</a>
+    <a href="${originalSourceLink}" target="_blank">View Original Source ↗</a>
+  </div>
+  <h1 class="post-title">${title}</h1>
+  <div class="post-meta">Published on ${displayDate} | Deep link: <a href="${originalSourceLink}" target="_blank">://iq2qq.com{postSlug || ''}</a></div>
+`;
+
+      // Inject clean structures straight into Substack's header body tags
+      if (htmlContent.includes('</head>')) {
+        htmlContent = htmlContent.replace('</head>', highFidelityStyles);
+      } else {
+        htmlContent = highFidelityStyles + htmlContent;
+      }
+
       fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
       verifiedChronologicalPosts.push({ file, title, pubDate });
     }
 
-    // Sort valid posts chronologically (Newest publications forced onto the top lines)
     verifiedChronologicalPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of verifiedChronologicalPosts) {
-      const displayDate = post.pubDate.toLocaleDateString('en-GB', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-
+      const displayDate = post.pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
       index += `
   <div class="post">
     <h2><a href="/posts/${post.file}">${post.title}</a></h2>
@@ -173,7 +203,7 @@ function splitCSVLine(line) {
   }
 
   index += `
-  <p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;">
+  <p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">
     Last updated: ${new Date().toUTCString()}<br>
     Powered by GitHub Actions + Cloudflare Pages
   </p>
@@ -181,8 +211,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("Process complete. Draft components excluded successfully.");
+  console.log("High fidelity formatting layer successfully deployed.");
 })();
+
 
 
 
