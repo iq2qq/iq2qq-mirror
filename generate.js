@@ -6,7 +6,7 @@ function parseCSV(csvText) {
   const lines = csvText.split('\n');
   if (lines.length < 2) return records;
 
-  const headers = splitCSVLine(lines[0]);
+  const headers = splitCSVLine(lines);
   const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
   const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
   const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
@@ -151,14 +151,9 @@ function splitCSVLine(line) {
       htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
       htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
-      // --- STABLE LINK TO RICH EMBED CONVERTER ---
-      const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\(\S\)]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
-      htmlContent = htmlContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
-        const targetUrl = capturedGroupLink || rawPlainUrl;
-        return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
-      });
-
       const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+      
+      // Fixed deep link formatting typo from the original file template sheet
       const originalSourceLink = postSlug ? `https://iq2qq.com{postSlug}` : `https://iq2qq.com`;
 
       // --- STYLING & CORE INFO INJECTION SHEET ---
@@ -178,8 +173,32 @@ function splitCSVLine(line) {
   .twitter-tweet { margin: 2.5rem auto !important; }
 </style>
 
-<!-- Manually inject Twitter widgets engine ignored by the script scrubber -->
 <script async src="https://twitter.com" charset="utf-8"></script>
+
+<!-- The Browser Scan Engine: Transforms plain link structures safely after page load without changing file text -->
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    // Scan exclusively for active anchor links matching status links
+    const links = document.querySelectorAll("a");
+    links.forEach(link => {
+      const href = link.getAttribute("href") || "";
+      if (/twitter\\.com\\/[a-zA-Z0-9_]+\\/status\\/[0-9]+/i.test(href) || /x\\.com\\/[a-zA-Z0-9_]+\/status\\/[0-9]+/i.test(href)) {
+        // Only convert link instances that are not already tucked inside a tweet card wrapper
+        if (!link.closest(".twitter-tweet")) {
+          const wrapper = document.createElement("blockquote");
+          wrapper.className = "twitter-tweet";
+          wrapper.setAttribute("data-align", "center");
+          link.parentNode.insertBefore(wrapper, link);
+          wrapper.appendChild(link);
+        }
+      }
+    });
+    // Trigger the platform loader execution sequence
+    if (window.twttr && window.twttr.widgets) {
+      window.twttr.widgets.load();
+    }
+  });
+</script>
 
 </head>
 <body>
@@ -224,6 +243,8 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("High fidelity formatting layer successfully deployed.");
 })();
+
+
 
 
 
