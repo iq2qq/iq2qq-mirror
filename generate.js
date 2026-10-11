@@ -1,5 +1,57 @@
+
 const fs = require('fs');
 const path = require('path');
+
+// A robust CSV line reader that correctly processes fields with embedded commas and quotes
+function parseCSV(csvText) {
+  const records = [];
+  const lines = csvText.split(\(/\r\)?\n/);
+  if (lines.length < 2) return records;
+
+  // Track field header positions dynamically
+  const headers = splitCSVLine(lines[0]);
+  const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
+  const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
+  const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
+  const slugIdx = headers.findIndex(h => h.toLowerCase().includes('slug'));
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const fields = splitCSVLine(line);
+    if (fields.length < 2) continue;
+
+    records.push({
+      id: fields[postIdIdx] || '',
+      title: fields[titleIdx] || '',
+      date: fields[dateIdx] || '',
+      slug: fields[slugIdx] || ''
+    });
+  }
+  return records;
+}
+
+// Tokenizer that accurately processes quoted fields in CSV formatting specifications
+function splitCSVLine(line) {
+  const result = [];
+  let insideQuote = false;
+  let currentField = '';
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      insideQuote = !insideQuote; // Toggle quote state
+    } else if (char === ',' && !insideQuote) {
+      result.push(currentField.trim());
+      currentField = '';
+    } else {
+      currentField += char;
+    }
+  }
+  result.push(currentField.trim());
+  return result;
+}
 
 (async () => {
   const postsDir = 'posts';
@@ -31,22 +83,28 @@ const path = require('path');
   <hr style="border: 0; border-top: 1px solid #ccc; margin: 2rem 0;">
 `;
 
-  // Explicit hardcoded absolute date structure for tracking order sequences
-  const absoluteDates = {
-    'the-closed-loop-how-the-permanent.html': new Date('2026-10-10T12:00:00Z'),
-    'the-slop-detector-is-the-slop-inside.html': new Date('2026-10-09T12:00:00Z'),
-    'the-rolling-cascade-how-elite-ai.html': new Date('2026-10-08T12:00:00Z'),
-    'the-mirror-methodology.html': new Date('2026-10-07T12:00:00Z'),
-    'the-1884-protocol-the-babylonian.html': new Date('2026-10-06T12:00:00Z'),
-    'the-clacton-spectacle-how-the-establishment.html': new Date('2026-10-05T12:00:00Z'),
-    'prime-suspects-how-the-fauci-era.html': new Date('2026-10-04T12:00:00Z'),
-    'manifesto-for-the-idioteological.html': new Date('2026-10-03T12:00:00Z'),
-    'nicola-what-a-mug-sturgeon-me-me.html': new Date('2026-10-02T12:00:00Z'),
-    'james-how-to-be-wrong-obrien-fallacies.html': new Date('2026-10-01T12:00:00Z'),
-    'declaration-of-humanai-sovereignty.html': new Date('2026-09-30T12:00:00Z'),
-    'bought-from-the-shop-pepper-sprayed.html': new Date('2026-09-29T12:00:00Z'),
-    '1984-zoomers-cops-leave-live-biometric.html': new Date('2026-09-28T12:00:00Z')
-  };
+  // Parse your posts.csv file
+  const csvPath = 'posts.csv';
+  let csvIdMap = {};
+  let csvSlugMap = {};
+
+  if (fs.existsSync(csvPath)) {
+    console.log("Loading metadata spreadsheet map...");
+    const csvContent = fs.readFileSync(csvPath, 'utf-8');
+    const records = parseCSV(csvContent);
+    
+    records.forEach(rec => {
+      const cleanTitle = rec.title.replace(/^"|"\$/g, '').trim();
+      const cleanDate = new Date(rec.date);
+
+      if (rec.id) {
+        csvIdMap[rec.id.trim()] = { title: cleanTitle, date: cleanDate };
+      }
+      if (rec.slug) {
+        csvSlugMap[rec.slug.trim().toLowerCase()] = { title: cleanTitle, date: cleanDate };
+      }
+    });
+  }
 
   const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
 
@@ -57,43 +115,52 @@ const path = require('path');
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // --- THE ANTI-HIJACK FILTER: Forcefully strip out all dynamic scripts ---
+      // Strip dynamic scripts completely to block Substack "Page Not Found" layout hijacking errors
       htmlContent = htmlContent.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      
-      // Clean up target attribute objects or noscript frame overrides
       htmlContent = htmlContent.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
       htmlContent = htmlContent.replace(/id="substack-app"/gi, 'id="clean-archive-root"');
 
-      // Extract the clean title text from HTML title tags
+      // Extract titles and dates using multiple fallback layers
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-      const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
-      if (titleMatch && titleMatch[1]) {
-        title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
-      }
-
-      // Map dates based on absolute registry or fallback patterns
       let pubDate = null;
-      if (absoluteDates[file]) {
-        pubDate = absoluteDates[file];
+
+      // Extract any numeric sequence from the filename to match Substack's Post IDs
+      const idMatch = file.match(/(\d+)/);
+      const fileNumericId = idMatch ? idMatch[1] : null;
+      const fileSlugPart = file.replace('.html', '').toLowerCase();
+
+      if (fileNumericId && csvIdMap[fileNumericId]) {
+        // Match found using the Substack Post ID column mapping
+        title = csvIdMap[fileNumericId].title;
+        pubDate = csvIdMap[fileNumericId].date;
+      } else if (csvSlugMap[fileSlugPart]) {
+        // Match found using the text slug string mapping
+        title = csvSlugMap[fileSlugPart].title;
+        pubDate = csvSlugMap[fileSlugPart].date;
       } else {
-        const fileNameDateMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
-        if (fileNameDateMatch && fileNameDateMatch[1]) {
-          pubDate = new Date(fileNameDateMatch[1]);
+        // Fuzzy search backup across both spreadsheet columns
+        const matchedIdKey = Object.keys(csvIdMap).find(idKey => file.includes(idKey));
+        if (matchedIdKey) {
+          title = csvIdMap[matchedIdKey].title;
+          pubDate = csvIdMap[matchedIdKey].date;
         }
       }
 
+      // Default baseline fallback if the mapping row fails
       if (!pubDate || isNaN(pubDate.getTime())) {
-        const fileStat = fs.statSync(filePath);
-        pubDate = fileStat.birthtime || fileStat.mtime;
+        const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch) {
+          title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
+        }
+        const datePrefixMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+        pubDate = datePrefixMatch ? new Date(datePrefixMatch) : fs.statSync(filePath).mtime;
       }
 
-      // Save the stripped clean HTML file back down to public folder target trees
       fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
-
       parsedPosts.push({ file, title, pubDate });
     }
 
-    // Sort strictly by real publication datetime values (Newest items on top)
+    // Sort all entries strictly by calendar dates (Newest posts directly at the top)
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of parsedPosts) {
@@ -120,5 +187,5 @@ const path = require('path');
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("Anti-hijack scrubbing and sorting configurations active.");
+  console.log(`Successfully mapped index with advanced metadata parsing logic.`);
 })();
