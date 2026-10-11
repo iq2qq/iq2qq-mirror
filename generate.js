@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// Simple, clear line splitter with zero complex symbols
 function parseCSV(csvText) {
   const records = [];
   const lines = csvText.split('\n');
@@ -111,15 +110,25 @@ function splitCSVLine(line) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      htmlContent = htmlContent.replace(/<script\\b[^<]*(?:(?!<\\/script>)<[^<]*)*<\\/script>/gi, '');
-      htmlContent = htmlContent.replace(/<noscript\\b[^<]*(?:(?!<\\/noscript>)<[^<]*)*<\\/noscript>/gi, '');
-      htmlContent = htmlContent.replace(/id="substack-app"/gi, 'id="clean-archive-root"');
+      // Safe script neutralization without dangerous regex tokens
+      htmlContent = htmlContent.split('<script').join('<!--<script');
+      htmlContent = htmlContent.split('</script>').join('</script>-->');
+      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
+      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       let pubDate = null;
 
-      const idMatch = file.match(/(\\d+)/);
-      const fileNumericId = idMatch ? idMatch[1] : null;
+      // Extract numeric sequences manually via simple character scanning
+      let fileNumericId = '';
+      for (let i = 0; i < file.length; i++) {
+        if (file[i] >= '0' && file[i] <= '9') {
+          fileNumericId += file[i];
+        } else if (fileNumericId.length > 0) {
+          break;
+        }
+      }
+
       const fileSlugPart = file.replace('.html', '').toLowerCase();
 
       if (fileNumericId && csvIdMap[fileNumericId]) {
@@ -137,12 +146,8 @@ function splitCSVLine(line) {
       }
 
       if (!pubDate || isNaN(pubDate.getTime())) {
-        const titleMatch = htmlContent.match(/<title>([^<]+)<\\/title>/i);
-        if (titleMatch) {
-          title = titleMatch[1].replace(' - by 777 - The Mirror', '').replace(' - The Mirror', '').trim();
-        }
-        const datePrefixMatch = file.match(/^(\\d{4}-\\d{2}-\\d{2})/);
-        pubDate = datePrefixMatch ? new Date(datePrefixMatch[1]) : fs.statSync(filePath).mtime;
+        const datePrefixMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+        pubDate = datePrefixMatch ? new Date(datePrefixMatch) : fs.statSync(filePath).mtime;
       }
 
       fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
@@ -177,3 +182,5 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("Process complete.");
 })();
+
+
