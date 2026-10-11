@@ -1,12 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 
+// Safe linear string parser for fields with embedded quote markers
 function parseCSV(csvText) {
   const records = [];
   const lines = csvText.split('\n');
   if (lines.length < 2) return records;
 
-  const headers = splitCSVLine(lines);
+  const headers = splitCSVLine(lines[0]);
   const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
   const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
   const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
@@ -20,15 +21,13 @@ function parseCSV(csvText) {
     if (fields.length < 2) continue;
 
     const rawTitle = fields[titleIdx] || '';
-    const cleanTitle = rawTitle.replace(/^"|"\$/g, '').trim();
-
-    if (!cleanTitle || cleanTitle.length === 0) continue;
+    const cleanTitle = rawTitle.replace(/^"|"/g, '').trim();
 
     records.push({
-      id: fields[postIdIdx] || '',
+      id: (fields[postIdIdx] || '').replace(/^"|"/g, '').trim(),
       title: cleanTitle,
-      date: fields[dateIdx] || '',
-      slug: fields[slugIdx] || ''
+      date: (fields[dateIdx] || '').replace(/^"|"/g, '').trim(),
+      slug: (fields[slugIdx] || '').replace(/^"|"/g, '').trim()
     });
   }
   return records;
@@ -40,15 +39,14 @@ function splitCSVLine(line) {
   let currentField = '';
 
   for (let i = 0; i < line.length; i++) {
-    const char = line[line.length - 1 - i]; // Reverse process to prevent slice drops
-    const nextChar = line[i];
-    if (nextChar === '"') {
+    const char = line[i];
+    if (char === '"') {
       insideQuote = !insideQuote;
-    } else if (nextChar === ',' && !insideQuote) {
+    } else if (char === ',' && !insideQuote) {
       result.push(currentField.trim());
       currentField = '';
     } else {
-      currentField += nextChar;
+      currentField += char;
     }
   }
   result.push(currentField.trim());
@@ -93,13 +91,14 @@ function splitCSVLine(line) {
   let csvSlugMap = {};
 
   if (fs.existsSync(csvPath)) {
+    console.log("Loading metadata spreadsheet map...");
     const csvContent = fs.readFileSync(csvPath, 'utf-8');
     const records = parseCSV(csvContent);
     
     records.forEach(rec => {
       const cleanDate = new Date(rec.date);
-      if (rec.id) csvIdMap[rec.id.trim()] = { title: rec.title, date: cleanDate, slug: rec.slug };
-      if (rec.slug) csvSlugMap[rec.slug.trim().toLowerCase()] = { title: rec.title, date: cleanDate, slug: rec.slug };
+      if (rec.id) csvIdMap[rec.id] = { title: rec.title, date: cleanDate, slug: rec.slug };
+      if (rec.slug) csvSlugMap[rec.slug.toLowerCase()] = { title: rec.title, date: cleanDate, slug: rec.slug };
     });
   }
 
@@ -112,8 +111,14 @@ function splitCSVLine(line) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
+      // Deactivate Substack backend scripts but allow X frames to run
+      htmlContent = htmlContent.split('<script').join('<!--<script');
+      htmlContent = htmlContent.split('</script>').join('</script>-->');
+      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
+      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
+
+      let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       let pubDate = null;
-      let title = '';
       let postSlug = '';
 
       let fileNumericId = '';
@@ -144,18 +149,15 @@ function splitCSVLine(line) {
         }
       }
 
-      if (!pubDate || isNaN(pubDate.getTime())) continue;
-
-      // Safe script neutralization
-      htmlContent = htmlContent.split('<script').join('<!--<script');
-      htmlContent = htmlContent.split('</script>').join('</script>-->');
-      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
-      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
+      // Safe fallback calculations instead of aggressive file skipping
+      if (!pubDate || isNaN(pubDate.getTime())) {
+        const datePrefixMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
+        pubDate = datePrefixMatch ? new Date(datePrefixMatch) : fs.statSync(filePath).mtime;
+      }
 
       const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
       const originalSourceLink = postSlug ? `https://://iq2qq.com{postSlug}` : `https://iq2qq.com/`;
 
-      // --- STYLING & EMBED LOGIC INJECTION ---
       const highFidelityStyles = `
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
@@ -171,7 +173,6 @@ function splitCSVLine(line) {
   h2 { font-size: 1.6rem; }
   .twitter-tweet { margin: 2rem auto !important; }
 </style>
-<!-- Safe injection of X's official widget script to render embedded layout frames -->
 <script async src="https://twitter.com" charset="utf-8"></script>
 </head>
 <body>
@@ -214,8 +215,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("X embed scripts successfully restored.");
+  console.log("Archive compiled successfully.");
 })();
+
 
 
 
