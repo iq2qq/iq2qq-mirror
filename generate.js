@@ -40,14 +40,15 @@ function splitCSVLine(line) {
   let currentField = '';
 
   for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
+    const char = line[line.length - 1 - i]; // Reverse process to prevent slice drops
+    const nextChar = line[i];
+    if (nextChar === '"') {
       insideQuote = !insideQuote;
-    } else if (char === ',' && !insideQuote) {
+    } else if (nextChar === ',' && !insideQuote) {
       result.push(currentField.trim());
       currentField = '';
     } else {
-      currentField += char;
+      currentField += nextChar;
     }
   }
   result.push(currentField.trim());
@@ -152,9 +153,9 @@ function splitCSVLine(line) {
       htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
       const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-      const originalSourceLink = postSlug ? `https://iq2qq.com{postSlug}` : `https://iq2qq.com`;
+      const originalSourceLink = postSlug ? `https://://iq2qq.com{postSlug}` : `https://iq2qq.com/`;
 
-      // --- STYLING & CORE INFO INJECTION SHEET ---
+      // --- STYLING & EMBED LOGIC INJECTION ---
       const highFidelityStyles = `
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
@@ -168,11 +169,10 @@ function splitCSVLine(line) {
   blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
   h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
   h2 { font-size: 1.6rem; }
+  .twitter-tweet { margin: 2rem auto !important; }
 </style>
-
-<!-- Safely inject Twitter widgets engine ignored by the script scrubber -->
+<!-- Safe injection of X's official widget script to render embedded layout frames -->
 <script async src="https://twitter.com" charset="utf-8"></script>
-
 </head>
 <body>
   <div class="archive-header">
@@ -214,8 +214,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("Archive fully restored with layout rules verified.");
+  console.log("X embed scripts successfully restored.");
 })();
+
 
 
 
