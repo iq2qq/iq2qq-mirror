@@ -1,9 +1,27 @@
 const fs = require('fs');
 const path = require('path');
 
+// Robust text line reader that safely ignores layout breaks inside quoted columns
 function parseCSV(csvText) {
   const records = [];
-  const lines = csvText.split('\n');
+  const lines = [];
+  let currentLine = '';
+  let insideQuote = false;
+
+  // Scan every single character to bundle rows cleanly
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    if (char === '"') {
+      insideQuote = !insideQuote;
+      currentLine += char;
+    } else if ((char === '\n' || char \(=== '\r'\)) && !insideQuote) {
+      if (currentLine.trim()) lines.push(currentLine.trim());
+      currentLine = '';
+    } else {
+      currentLine += char;
+    }
+  }
+  if (currentLine.trim()) lines.push(currentLine.trim());
   if (lines.length < 2) return records;
 
   const headers = splitCSVLine(lines[0]);
@@ -13,15 +31,18 @@ function parseCSV(csvText) {
   const slugIdx = headers.findIndex(h => h.toLowerCase().includes('slug'));
 
   for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const fields = splitCSVLine(line);
+    const fields = splitCSVLine(lines[i]);
     if (fields.length < 2) continue;
+
+    const rawTitle = fields[titleIdx] || '';
+    const cleanTitle = rawTitle.replace(/^"|"\$/g, '').trim();
+
+    // Skip empty lines or technical Substack configurations that lack titles
+    if (!cleanTitle || cleanTitle.length === 0) continue;
 
     records.push({
       id: fields[postIdIdx] || '',
-      title: fields[titleIdx] || '',
+      title: cleanTitle,
       date: fields[dateIdx] || '',
       slug: fields[slugIdx] || ''
     });
@@ -89,15 +110,9 @@ function splitCSVLine(line) {
     const records = parseCSV(csvContent);
     
     records.forEach(rec => {
-      const cleanTitle = rec.title.replace(/^"|"\$/g, '').trim();
       const cleanDate = new Date(rec.date);
-
-      if (rec.id) {
-        csvIdMap[rec.id.trim()] = { title: cleanTitle, date: cleanDate };
-      }
-      if (rec.slug) {
-        csvSlugMap[rec.slug.trim().toLowerCase()] = { title: cleanTitle, date: cleanDate };
-      }
+      if (rec.id) csvIdMap[rec.id.trim()] = { title: rec.title, date: cleanDate };
+      if (rec.slug) csvSlugMap[rec.slug.trim().toLowerCase()] = { title: rec.title, date: cleanDate };
     });
   }
 
@@ -110,7 +125,7 @@ function splitCSVLine(line) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // Safe script neutralization without dangerous regex tokens
+      // Neutralize scripts safely
       htmlContent = htmlContent.split('<script').join('<!--<script');
       htmlContent = htmlContent.split('</script>').join('</script>-->');
       htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
@@ -119,7 +134,6 @@ function splitCSVLine(line) {
       let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
       let pubDate = null;
 
-      // Extract numeric sequences manually via simple character scanning
       let fileNumericId = '';
       for (let i = 0; i < file.length; i++) {
         if (file[i] >= '0' && file[i] <= '9') {
@@ -154,6 +168,7 @@ function splitCSVLine(line) {
       parsedPosts.push({ file, title, pubDate });
     }
 
+    // Sort valid posts chronologically
     parsedPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of parsedPosts) {
@@ -182,5 +197,6 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("Process complete.");
 })();
+
 
 
