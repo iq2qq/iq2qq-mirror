@@ -76,7 +76,6 @@ function splitCSVLine(line) {
     a { color: #0066cc; text-decoration: none; font-weight: 600; }
     a:hover { text-decoration: underline; }
     .date { color: #666; font-size: 0.9rem; margin-top: 0.3rem; }
-    .section-title { margin-top: 4rem; color: #555; border-bottom: 2px solid #555; padding-bottom: 0.5rem; }
   </style>
 </head>
 <body>
@@ -105,23 +104,14 @@ function splitCSVLine(line) {
 
   if (files.length > 0) {
     const verifiedChronologicalPosts = [];
-    const olderLegacyArchivePosts = [];
 
     for (const file of files) {
       const filePath = path.join(postsDir, file);
       let htmlContent = fs.readFileSync(filePath, 'utf-8');
 
-      // Prevent script tracking hijacking execution loops
-      htmlContent = htmlContent.split('<script').join('<!--<script');
-      htmlContent = htmlContent.split('</script>').join('</script>-->');
-      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
-      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
-
       let pubDate = null;
       let title = '';
-      let isLegacy = false;
 
-      // Extract raw numeric ID references to match rows
       let fileNumericId = '';
       for (let i = 0; i < file.length; i++) {
         if (file[i] >= '0' && file[i] <= '9') {
@@ -133,6 +123,7 @@ function splitCSVLine(line) {
 
       const fileSlugPart = file.replace('.html', '').toLowerCase();
 
+      // Check for an exact matching index item within your database rows
       if (fileNumericId && csvIdMap[fileNumericId]) {
         title = csvIdMap[fileNumericId].title;
         pubDate = csvIdMap[fileNumericId].date;
@@ -147,49 +138,25 @@ function splitCSVLine(line) {
         }
       }
 
-      // --- CLEANUP MASK LAYER: Strip remaining hashes and dots ---
+      // --- FILTER LOGIC: If the file is not mapped in the CSV rows, it's a draft. SKIP IT entirely! ---
       if (!pubDate || isNaN(pubDate.getTime())) {
-        isLegacy = true;
-        pubDate = new Date(0); // Shift them cleanly to base historical layers
-
-        // Clean out digits and structural delimiters up to the first alphanumeric title character
-        let scrubbedName = file.replace('.html', '');
-        if (fileNumericId && scrubbedName.startsWith(fileNumericId)) {
-          scrubbedName = scrubbedName.slice(fileNumericId.length);
-          if (scrubbedName.startsWith('.') || scrubbedName.startsWith('-')) {
-            scrubbedName = scrubbedName.slice(1);
-          }
-        }
-
-        // Map layout text casing strings beautifully
-        title = scrubbedName
-          .split('-')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ')
-          .split('.')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ')
-          .trim();
-
-        if (!title) title = "Archived Essay Link";
+        console.log(`Filtering out draft/unmapped asset file link: ${file}`);
+        continue;
       }
+
+      // Neutralize runtime script elements on verified articles
+      htmlContent = htmlContent.split('<script').join('<!--<script');
+      htmlContent = htmlContent.split('</script>').join('</script>-->');
+      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
+      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
       fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
-
-      if (isLegacy) {
-        olderLegacyArchivePosts.push({ file, title, pubDate });
-      } else {
-        verifiedChronologicalPosts.push({ file, title, pubDate });
-      }
+      verifiedChronologicalPosts.push({ file, title, pubDate });
     }
 
-    // Sort active publications chronologically
+    // Sort valid posts chronologically (Newest publications forced onto the top lines)
     verifiedChronologicalPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
-    
-    // Sort unmapped text assets alphabetically by title
-    olderLegacyArchivePosts.sort((a, b) => a.title.localeCompare(b.title));
 
-    // Append Newest Verified Posts
     for (const post of verifiedChronologicalPosts) {
       const displayDate = post.pubDate.toLocaleDateString('en-GB', {
         year: 'numeric',
@@ -203,19 +170,6 @@ function splitCSVLine(line) {
     <div class="date">${displayDate}</div>
   </div>`;
     }
-
-    // Append Cleaned Up Older Document Layers
-    if (olderLegacyArchivePosts.length > 0) {
-      index += `<h2 class="section-title">Older Investigative Archives</h2>`;
-      
-      for (const post of olderLegacyArchivePosts) {
-        index += `
-  <div class="post">
-    <h2><a href="/posts/${post.file}">${post.title}</a></h2>
-    <div class="date">Historical Archive Entry</div>
-  </div>`;
-      }
-    }
   }
 
   index += `
@@ -227,8 +181,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("Process complete.");
+  console.log("Process complete. Draft components excluded successfully.");
 })();
+
 
 
 
