@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// Simple XML helper to unescape character entities from RSS feeds
 function unescapeXML(str) {
   return str
     .replace(/&amp;/g, '&')
@@ -16,7 +15,6 @@ function unescapeXML(str) {
   const publicDir = 'public';
   const targetPublicPostsDir = path.join(publicDir, 'posts');
 
-  // Ensure our processing directories exist
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir);
   if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
@@ -45,60 +43,57 @@ function unescapeXML(str) {
   <hr>
 `;
 
+  // Track posts chronologically for the home page builder
   const verifiedChronologicalPosts = [];
 
+  // --- STEP 1: FETCH NEW POSTS AUTOMATICALLY FROM THE RSS FEED ---
   try {
-    console.log("Connecting to Substack live stream pipeline...");
+    console.log("Checking live RSS feed for brand new posts...");
     const response = await fetch('https://iq2qq.com');
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const rssText = await response.text();
-    
-    // Extract individual items from the XML feed
-    const items = rssText.match(/<item>[\s\(\S\)]*?<\/item>/g) || [];
-    console.log(`Discovered ${items.length} items on live feed. Synchronizing content...`);
-    
-    for (const item of items) {
-      // Safely scrape content fields out of the XML structure
-      const titleMatch = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || item.match(/<title>([\s\(\S\)]*?)<\/title>/);
-      const linkMatch = item.match(/<link>([\s\(\S\)]*?)<\/link>/);
-      const pubDateMatch = item.match(/<pubDate>([\s\(\S\)]*?)<\/pubDate>/);
-      // Grab full text content directly from the RSS item payload 
-      const contentMatch = item.match(/<content:encoded><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>/) || item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || item.match(/<description>([\s\(\S\)]*?)<\/description>/);
+    if (response.ok) {
+      const rssText = await response.text();
+      const items = rssText.match(/<item>[\s\S]*?<\/item>/g) || [];
       
-      const rawTitle = titleMatch ? titleMatch[1] : '';
-      const cleanTitle = unescapeXML(rawTitle.replace(/^"|"\$/g, '')).trim();
-      const link = linkMatch ? linkMatch[1].trim() : '';
-      const pubDateStr = pubDateMatch ? pubDateMatch[1].trim() : '';
-      let bodyContent = contentMatch ? contentMatch[1] : '';
-      
-      if (link && cleanTitle) {
-        // Parse out the trailing slug text string (e.g. from https://iq2qq.com)
-        const urlParts = link.split('?')[0].split('/');
-        const slug = urlParts[urlParts.length - 1] || '';
-        const file = `${slug}.html`;
-        const cleanDate = new Date(pubDateStr);
+      for (const item of items) {
+        const titleMatch = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || item.match(/<title>([\s\S]*?)<\/title>/);
+        const linkMatch = item.match(/<link>([\s\S]*?)<\/link>/);
+        const pubDateMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+        const contentMatch = item.match(/<content:encoded><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>/) || item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/);
         
-        if (isNaN(cleanDate.getTime())) continue;
+        const rawTitle = titleMatch ? titleMatch[1] : '';
+        const cleanTitle = unescapeXML(rawTitle.replace(/^"|"\$/g, '')).trim();
+        const link = linkMatch ? linkMatch[1].trim() : '';
+        const pubDateStr = pubDateMatch ? pubDateMatch[1].trim() : '';
+        let bodyContent = contentMatch ? contentMatch[1] : '';
+        
+        if (link && cleanTitle) {
+          const urlParts = link.split('?')[0].split('/');
+          const slug = urlParts[urlParts.length - 1] || '';
+          const file = `${slug}.html`;
+          const localFilePath = path.join(postsDir, file);
+          
+          // CRITICAL CHECK: Only download if you haven't manually put it in already
+          if (!fs.existsSync(localFilePath)) {
+            console.log(`New post detected on Substack: "${cleanTitle}". Saving automatically...`);
+            
+            // Clean scripts from feed data
+            bodyContent = bodyContent.split('<script').join('<!--<script');
+            bodyContent = bodyContent.split('</script>').join('</script>-->');
+            bodyContent = bodyContent.split('<noscript').join('<!--<noscript');
+            bodyContent = bodyContent.split('</noscript>').join('</noscript>-->');
 
-        // --- SAFE SCRIPT NEUTRALIZATION ---
-        // Scrub out tracking pixels or raw script payloads attached inside feed strings
-        bodyContent = bodyContent.split('<script').join('<!--<script');
-        bodyContent = bodyContent.split('</script>').join('</script>-->');
-        bodyContent = bodyContent.split('<noscript').join('<!--<noscript');
-        bodyContent = bodyContent.split('</noscript>').join('</noscript>-->');
+            // Apply your Twitter embed fix to the new content
+            const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\S]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
+            bodyContent = bodyContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
+              const targetUrl = capturedGroupLink || rawPlainUrl;
+              return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
+            });
 
-        // --- ROBUST TWITTER ANCHOR TO EMBED CONVERTER ---
-        const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\(\S\)]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
-        bodyContent = bodyContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
-          const targetUrl = capturedGroupLink || rawPlainUrl;
-          return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
-        });
+            const cleanDate = new Date(pubDateStr);
+            const displayDate = cleanDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+            const originalSourceLink = `https://iq2qq.com{slug}`;
 
-        const displayDate = cleanDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-        const originalSourceLink = `https://iq2qq.com{slug}`;
-
-        // --- STYLING & HIGH-FIDELITY INJECTION SHEET ---
-        const highFidelityStyles = `<!DOCTYPE html>
+            const highFidelityStyles = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -127,25 +122,61 @@ function unescapeXML(str) {
   </div>
   <h1 class="post-title">${cleanTitle}</h1>
   <div class="post-meta">Published on ${displayDate} | Deep link: <a href="${originalSourceLink}" target="_blank">://iq2qq.com{slug}</a></div>
-  <div class="post-body">
-    ${bodyContent}
-  </div>
+  <div class="post-body">${bodyContent}</div>
 </body>
 </html>`;
 
-        // Write the dynamically generated post directly into the static output folder
-        fs.writeFileSync(path.join(targetPublicPostsDir, file), highFidelityStyles);
-        
-        // Cache data memory structures for the home index builder
-        verifiedChronologicalPosts.push({ file, title: cleanTitle, pubDate: cleanDate });
+            // Save new post to local folder so it's committed safely
+            fs.writeFileSync(localFilePath, highFidelityStyles);
+          }
+        }
       }
     }
   } catch (error) {
-    console.error("Critical Stream Interruption: Live RSS pipeline build crashed.", error);
+    console.error("RSS fetch error (using existing local /posts files only):", error);
   }
 
-  // Build out chronological landing index page links
-  if (verifiedChronologicalPosts.length > 0) {
+  // --- STEP 2: BUILD COMPILATION TRACKER FROM ALL LOCAL HTML FILES ---
+  const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
+
+  if (files.length > 0) {
+    for (const file of files) {
+      const filePath = path.join(postsDir, file);
+      let htmlContent = fs.readFileSync(filePath, 'utf-8');
+
+      // Attempt to pull the title dynamically directly from inside the page markup
+      let title = '';
+      const titleTagMatch = htmlContent.match(/<title>([\s\S]*?)<\/title>/);
+      if (titleTagMatch && titleTagMatch[1]) {
+        title = titleTagMatch[1].trim();
+      } else {
+        title = file.replace('.html', '').replace(/[-_]/g, ' ');
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+      }
+
+      // Read file timestamp metadata for exact list chronology
+      const pubDate = fs.statSync(filePath).mtime;
+
+      // Make sure Twitter conversion runs cleanly over your pre-loaded pages too
+      const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\S]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
+      htmlContent = htmlContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
+        const targetUrl = capturedGroupLink || rawPlainUrl;
+        return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
+      });
+
+      // Inject your global script wrapper to support layouts
+      if (!htmlContent.includes('://twitter.com')) {
+        if (htmlContent.includes('</head>')) {
+          htmlContent = htmlContent.replace('</head>', '<script async src="https://twitter.com" charset="utf-8"></script></head>');
+        }
+      }
+
+      // Write compiled page to output folder
+      fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
+      verifiedChronologicalPosts.push({ file, title, pubDate });
+    }
+
+    // Sort all combined items (old manual ones + fresh auto ones) by date
     verifiedChronologicalPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of verifiedChronologicalPosts) {
@@ -160,15 +191,7 @@ function unescapeXML(str) {
 
   index += `
   <p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">
-    Last updated: ${new Date().toUTCString()}<br>
-    Powered by GitHub Actions + Cloudflare Pages
-  </p>
-</body>
-</html>`;
 
-  fs.writeFileSync('public/index.html', index);
-  console.log("High fidelity formatting layer successfully deployed via automated stream pipelines.");
-})();
 
 
 
