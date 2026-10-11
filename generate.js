@@ -151,11 +151,13 @@ function splitCSVLine(line) {
       htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
       htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
 
-      // --- AUTOMATED TWITTER LINK PARSER & EMBED WRAPPER ---
-      // This regex captures loose twitter.com or x.com status links and wraps them in a blockquote container
-      const twitterRegex = /(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
-      htmlContent = htmlContent.replace(twitterRegex, (match) => {
-        return `<blockquote class="twitter-tweet"><a href="${match}"></a></blockquote>`;
+      // --- FIX: ROBUST TWITTER ANCHOR TO EMBED CONVERTER ---
+      // This regex safely targets only <a> links or plain URLs pointing directly to tweets/status items
+      const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\(\S\)]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
+      
+      htmlContent = htmlContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
+        const targetUrl = capturedGroupLink || rawPlainUrl;
+        return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
       });
 
       const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -175,12 +177,11 @@ function splitCSVLine(line) {
   blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
   h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
   h2 { font-size: 1.6rem; }
-  /* Optional: Center embeds cleanly in layout */
-  .twitter-tweet { margin: 2rem auto !important; }
+  .twitter-tweet { margin: 2.5rem auto !important; }
 </style>
 
-<!-- Manually inject Twitter widgets engine ignored by the script scrubber -->
-<script async src="https://twitter.com" charset="utf-8"></script>
+<!-- Injected script to run on compilation -->
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
 
 </head>
 <body>
@@ -226,6 +227,7 @@ function splitCSVLine(line) {
   fs.writeFileSync('public/index.html', index);
   console.log("High fidelity formatting layer successfully deployed.");
 })();
+
 
 
 
