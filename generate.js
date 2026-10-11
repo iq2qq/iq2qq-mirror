@@ -1,57 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 
-function parseCSV(csvText) {
-  const records = [];
-  const lines = csvText.split('\n');
-  if (lines.length < 2) return records;
-
-  const headers = splitCSVLine(lines[0]);
-  const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
-  const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
-  const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
-  const slugIdx = headers.findIndex(h => h.toLowerCase().includes('slug'));
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const fields = splitCSVLine(line);
-    if (fields.length < 2) continue;
-
-    const rawTitle = fields[titleIdx] || '';
-    const cleanTitle = rawTitle.replace(/^"|"\$/g, '').trim();
-
-    if (!cleanTitle || cleanTitle.length === 0) continue;
-
-    records.push({
-      id: fields[postIdIdx] || '',
-      title: cleanTitle,
-      date: fields[dateIdx] || '',
-      slug: fields[slugIdx] || ''
-    });
-  }
-  return records;
-}
-
-function splitCSVLine(line) {
-  const result = [];
-  let insideQuote = false;
-  let currentField = '';
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      insideQuote = !insideQuote;
-    } else if (char === ',' && !insideQuote) {
-      result.push(currentField.trim());
-      currentField = '';
-    } else {
-      currentField += char;
-    }
-  }
-  result.push(currentField.trim());
-  return result;
+// Simple XML helper to unescape character entities from RSS feeds
+function unescapeXML(str) {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 (async () => {
@@ -59,6 +16,7 @@ function splitCSVLine(line) {
   const publicDir = 'public';
   const targetPublicPostsDir = path.join(publicDir, 'posts');
 
+  // Ensure our processing directories exist
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir);
   if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
@@ -87,123 +45,107 @@ function splitCSVLine(line) {
   <hr>
 `;
 
-  const csvPath = 'posts.csv';
-  let csvIdMap = {};
-  let csvSlugMap = {};
+  const verifiedChronologicalPosts = [];
 
-  if (fs.existsSync(csvPath)) {
-    const csvContent = fs.readFileSync(csvPath, 'utf-8');
-    const records = parseCSV(csvContent);
+  try {
+    console.log("Connecting to Substack live stream pipeline...");
+    const response = await fetch('https://iq2qq.com');
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    const rssText = await response.text();
     
-    records.forEach(rec => {
-      const cleanDate = new Date(rec.date);
-      if (rec.id) csvIdMap[rec.id.trim()] = { title: rec.title, date: cleanDate, slug: rec.slug };
-      if (rec.slug) csvSlugMap[rec.slug.trim().toLowerCase()] = { title: rec.title, date: cleanDate, slug: rec.slug };
-    });
-  }
-
-  const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
-
-  if (files.length > 0) {
-    const verifiedChronologicalPosts = [];
-
-    for (const file of files) {
-      const filePath = path.join(postsDir, file);
-      let htmlContent = fs.readFileSync(filePath, 'utf-8');
-
-      let pubDate = null;
-      let title = '';
-      let postSlug = '';
-
-      let fileNumericId = '';
-      for (let i = 0; i < file.length; i++) {
-        if (file[i] >= '0' && file[i] <= '9') {
-          fileNumericId += file[i];
-        } else if (fileNumericId.length > 0) {
-          break;
-        }
-      }
-
-      const fileSlugPart = file.replace('.html', '').toLowerCase();
-
-      if (fileNumericId && csvIdMap[fileNumericId]) {
-        title = csvIdMap[fileNumericId].title;
-        pubDate = csvIdMap[fileNumericId].date;
-        postSlug = csvIdMap[fileNumericId].slug;
-      } else if (csvSlugMap[fileSlugPart]) {
-        title = csvSlugMap[fileSlugPart].title;
-        pubDate = csvSlugMap[fileSlugPart].date;
-        postSlug = csvSlugMap[fileSlugPart].slug;
-      } else {
-        const matchedIdKey = Object.keys(csvIdMap).find(idKey => file.includes(idKey));
-        if (matchedIdKey) {
-          title = csvIdMap[matchedIdKey].title;
-          pubDate = csvIdMap[matchedIdKey].date;
-          postSlug = csvIdMap[matchedIdKey].slug;
-        }
-      }
-
-      if (!pubDate || isNaN(pubDate.getTime())) continue; // Ignore drafts entirely
-
-      // Safe script neutralization
-      htmlContent = htmlContent.split('<script').join('<!--<script');
-      htmlContent = htmlContent.split('</script>').join('</script>-->');
-      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
-      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
-
-      // --- FIX: ROBUST TWITTER ANCHOR TO EMBED CONVERTER ---
-      // This regex safely targets only <a> links or plain URLs pointing directly to tweets/status items
-      const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\(\S\)]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
+    // Extract individual items from the XML feed
+    const items = rssText.match(/<item>[\s\(\S\)]*?<\/item>/g) || [];
+    console.log(`Discovered ${items.length} items on live feed. Synchronizing content...`);
+    
+    for (const item of items) {
+      // Safely scrape content fields out of the XML structure
+      const titleMatch = item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/) || item.match(/<title>([\s\(\S\)]*?)<\/title>/);
+      const linkMatch = item.match(/<link>([\s\(\S\)]*?)<\/link>/);
+      const pubDateMatch = item.match(/<pubDate>([\s\(\S\)]*?)<\/pubDate>/);
+      // Grab full text content directly from the RSS item payload 
+      const contentMatch = item.match(/<content:encoded><!\[CDATA\[([\s\S]*?)\]\]><\/content:encoded>/) || item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || item.match(/<description>([\s\(\S\)]*?)<\/description>/);
       
-      htmlContent = htmlContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
-        const targetUrl = capturedGroupLink || rawPlainUrl;
-        return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
-      });
+      const rawTitle = titleMatch ? titleMatch[1] : '';
+      const cleanTitle = unescapeXML(rawTitle.replace(/^"|"\$/g, '')).trim();
+      const link = linkMatch ? linkMatch[1].trim() : '';
+      const pubDateStr = pubDateMatch ? pubDateMatch[1].trim() : '';
+      let bodyContent = contentMatch ? contentMatch[1] : '';
+      
+      if (link && cleanTitle) {
+        // Parse out the trailing slug text string (e.g. from https://iq2qq.com)
+        const urlParts = link.split('?')[0].split('/');
+        const slug = urlParts[urlParts.length - 1] || '';
+        const file = `${slug}.html`;
+        const cleanDate = new Date(pubDateStr);
+        
+        if (isNaN(cleanDate.getTime())) continue;
 
-      const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-      const originalSourceLink = postSlug ? `https://iq2qq.com{postSlug}` : `https://iq2qq.com`;
+        // --- SAFE SCRIPT NEUTRALIZATION ---
+        // Scrub out tracking pixels or raw script payloads attached inside feed strings
+        bodyContent = bodyContent.split('<script').join('<!--<script');
+        bodyContent = bodyContent.split('</script>').join('</script>-->');
+        bodyContent = bodyContent.split('<noscript').join('<!--<noscript');
+        bodyContent = bodyContent.split('</noscript>').join('</noscript>-->');
 
-      // --- STYLING & CORE INFO INJECTION SHEET ---
-      const highFidelityStyles = `
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
-  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 3rem; font-size: 0.95rem; font-weight: 500; }
-  .archive-header a { color: #0066cc; text-decoration: none; }
-  .post-title { font-size: 2.6rem; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 0.5rem; color: #000000; }
-  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 3rem; font-weight: 500; }
-  .post-meta a { color: #0066cc; text-decoration: underline; }
-  img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 2rem auto; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
-  p { margin-bottom: 1.5rem; font-size: 1.1rem; }
-  blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
-  h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
-  h2 { font-size: 1.6rem; }
-  .twitter-tweet { margin: 2.5rem auto !important; }
-</style>
+        // --- ROBUST TWITTER ANCHOR TO EMBED CONVERTER ---
+        const tweetLinkRegex = /(?:<a[^>]*href=["']([^"']*(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+[^"']*)["'][^>]*>[\s\(\S\)]*?<\/a>)|(https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9_]+\/status\/[0-9]+)/gi;
+        bodyContent = bodyContent.replace(tweetLinkRegex, (match, capturedGroupLink, rawPlainUrl) => {
+          const targetUrl = capturedGroupLink || rawPlainUrl;
+          return `<blockquote class="twitter-tweet" data-align="center"><a href="${targetUrl}"></a></blockquote>`;
+        });
 
-<!-- Injected script to run on compilation -->
-<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+        const displayDate = cleanDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+        const originalSourceLink = `https://iq2qq.com{slug}`;
 
+        // --- STYLING & HIGH-FIDELITY INJECTION SHEET ---
+        const highFidelityStyles = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${cleanTitle}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
+    .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 3rem; font-size: 0.95rem; font-weight: 500; }
+    .archive-header a { color: #0066cc; text-decoration: none; }
+    .post-title { font-size: 2.6rem; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 0.5rem; color: #000000; }
+    .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 3rem; font-weight: 500; }
+    .post-meta a { color: #0066cc; text-decoration: underline; }
+    img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 2rem auto; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+    p { margin-bottom: 1.5rem; font-size: 1.1rem; }
+    blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
+    h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
+    h2 { font-size: 1.6rem; }
+    .twitter-tweet { margin: 2.5rem auto !important; }
+  </style>
+  <script async src="https://twitter.com" charset="utf-8"></script>
 </head>
 <body>
   <div class="archive-header">
     <a href="/">← Back to Archive</a>
     <a href="${originalSourceLink}" target="_blank">View Original Source ↗</a>
   </div>
-  <h1 class="post-title">${title}</h1>
-  <div class="post-meta">Published on ${displayDate} | Deep link: <a href="${originalSourceLink}" target="_blank">://iq2qq.com{postSlug || ''}</a></div>
-`;
+  <h1 class="post-title">${cleanTitle}</h1>
+  <div class="post-meta">Published on ${displayDate} | Deep link: <a href="${originalSourceLink}" target="_blank">://iq2qq.com{slug}</a></div>
+  <div class="post-body">
+    ${bodyContent}
+  </div>
+</body>
+</html>`;
 
-      // Inject clean structures straight into Substack's header body tags
-      if (htmlContent.includes('</head>')) {
-        htmlContent = htmlContent.replace('</head>', highFidelityStyles);
-      } else {
-        htmlContent = highFidelityStyles + htmlContent;
+        // Write the dynamically generated post directly into the static output folder
+        fs.writeFileSync(path.join(targetPublicPostsDir, file), highFidelityStyles);
+        
+        // Cache data memory structures for the home index builder
+        verifiedChronologicalPosts.push({ file, title: cleanTitle, pubDate: cleanDate });
       }
-
-      fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
-      verifiedChronologicalPosts.push({ file, title, pubDate });
     }
+  } catch (error) {
+    console.error("Critical Stream Interruption: Live RSS pipeline build crashed.", error);
+  }
 
+  // Build out chronological landing index page links
+  if (verifiedChronologicalPosts.length > 0) {
     verifiedChronologicalPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
 
     for (const post of verifiedChronologicalPosts) {
@@ -225,8 +167,9 @@ function splitCSVLine(line) {
 </html>`;
 
   fs.writeFileSync('public/index.html', index);
-  console.log("High fidelity formatting layer successfully deployed.");
+  console.log("High fidelity formatting layer successfully deployed via automated stream pipelines.");
 })();
+
 
 
 
