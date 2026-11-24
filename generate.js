@@ -1,221 +1,277 @@
+
 const fs = require('fs');
 const path = require('path');
 
-// Safe linear string parser for fields with embedded quote markers
+const SUBSTACK_BASE = 'https://iq2qq.com';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function parseCSV(csvText) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < csvText.length; i++) {
+    const ch = csvText[i], next = csvText[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') { field += '"'; i++; }
+      else if (ch === '"') inQuotes = false;
+      else field += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(field.trim()); field = ''; }
+      else if (ch === '\r' && next === '\n') { row.push(field.trim()); rows.push(row); row = []; field = ''; i++; }
+      else if (ch === '\n' || ch === '\r') { row.push(field.trim()); rows.push(row); row = []; field = ''; }
+      else field += ch;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field.trim()); rows.push(row); }
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map((h) => h.toLowerCase());
+  const idIdx = headers.findIndex((h) => h === 'post_id' || h.includes('id'));
+  const titleIdx = headers.findIndex((h) => h === 'title' || h.includes('title'));
+  const dateIdx = headers.findIndex((h) => h === 'post_date' || h.includes('date'));
+  const slugIdx = headers.findIndex((h) => h === 'slug' || h.includes('slug'));
+  const sectionIdx = headers.findIndex((h) => h.includes('section'));
+
   const records = [];
-  const lines = csvText.split('\n');
-  if (lines.length < 2) return records;
-
-  const headers = splitCSVLine(lines[0]);
-  const postIdIdx = headers.findIndex(h => h.toLowerCase().includes('id'));
-  const titleIdx = headers.findIndex(h => h.toLowerCase().includes('title'));
-  const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
-  const slugIdx = headers.findIndex(h => h.toLowerCase().includes('slug'));
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const fields = splitCSVLine(line);
-    if (fields.length < 2) continue;
-
-    const rawTitle = fields[titleIdx] || '';
-    const cleanTitle = rawTitle.replace(/^"|"/g, '').trim();
-
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.length < 2) continue;
+    const rawId = (r[idIdx] || '').trim();
+    const numericId = (rawId.match(/^(\d+)/) || [])[1] || rawId;
+    const derivedSlug = rawId.includes('.') ? rawId.split('.').slice(1).join('.') : '';
     records.push({
-      id: (fields[postIdIdx] || '').replace(/^"|"/g, '').trim(),
-      title: cleanTitle,
-      date: (fields[dateIdx] || '').replace(/^"|"/g, '').trim(),
-      slug: (fields[slugIdx] || '').replace(/^"|"/g, '').trim()
+      id: numericId,
+      title: (r[titleIdx] || '').trim(),
+      date: (r[dateIdx] || '').trim(),
+      slug: (slugIdx >= 0 && r[slugIdx] ? r[slugIdx] : derivedSlug).trim(),
+      section: sectionIdx >= 0 ? (r[sectionIdx] || '').trim() : '',
     });
   }
   return records;
 }
 
-function splitCSVLine(line) {
-  const result = [];
-  let insideQuote = false;
-  let currentField = '';
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      insideQuote = !insideQuote;
-    } else if (char === ',' && !insideQuote) {
-      result.push(currentField.trim());
-      currentField = '';
-    } else {
-      currentField += char;
-    }
-  }
-  result.push(currentField.trim());
-  return result;
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-(async () => {
-  const postsDir = 'posts';
-  const publicDir = 'public';
-  const targetPublicPostsDir = path.join(publicDir, 'posts');
+function enhanceSubstackEmbeds(html) {
+  let out = String(html || '');
+  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
-  if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir);
-  if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
+  out = out.replace(/<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi, (block) => {
+    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
+    if (attrMatch) {
+      try {
+        const attrs = JSON.parse(attrMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+        const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
+        if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
+      } catch (_) {}
+    }
+    const linkMatch = block.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
+    if (linkMatch) return `<blockquote class="twitter-tweet"><a href="${linkMatch[1]}">${linkMatch[1]}</a></blockquote>`;
+    return block;
+  });
+
+  out = out.replace(/<div[^>]*class="[^"]*\byoutube-wrap\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi, (block) => {
+    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
+    if (attrMatch) {
+      try {
+        const attrs = JSON.parse(attrMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+        const videoId = attrs.videoId || attrs.video_id;
+        if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+      } catch (_) {}
+    }
+    return block;
+  });
+  return out;
+}
+
+
+async function fetchJsonWithRetry(url, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', Referer: `${SUBSTACK_BASE}/archive` },
+    });
+    if (res.ok) return await res.json();
+    if ((res.status === 429 || res.status >= 500) && attempt < retries) {
+      await sleep(attempt * 2000);
+      continue;
+    }
+    throw new Error(`Substack API failed (${res.status}) for ${url}`);
+  }
+}
+
+async function syncFromSubstackApi(postsDir, apiCachePath) {
+  let apiCache = {};
+  if (fs.existsSync(apiCachePath)) {
+    try { apiCache = JSON.parse(fs.readFileSync(apiCachePath, 'utf-8')); } catch (_) {}
+  }
+
+  const existingIds = new Set();
+  for (const f of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
+    const m = f.match(/^(\d+)\./);
+    if (m) existingIds.add(m[1]);
+  }
+
+  console.log('Fetching all sections from Substack API...');
+  let offset = 0, newlySaved = 0;
+
+  while (true) {
+    const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&search=&offset=${offset}&limit=50`);
+    if (!Array.isArray(batch) || batch.length === 0) break;
+
+    for (const item of batch) {
+      const id = String(item.id || '').trim();
+      const slug = String(item.slug || '').trim();
+      const title = String(item.title || '').trim();
+      if (!id || !slug || !title) continue;
+
+      apiCache[id] = {
+        id,
+        slug,
+        title,
+        date: item.post_date || item.published_at || '',
+        section: (item.section && item.section.name) || item.section_name || 'Main',
+        canonical_url: item.canonical_url || `${SUBSTACK_BASE}/p/${slug}`,
+      };
+
+      if (!existingIds.has(id)) {
+        console.log(`Downloading [${id}] ${title}`);
+        await sleep(1200);
+        const fullPost = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/posts/${encodeURIComponent(slug)}`);
+        const bodyHtml = fullPost && fullPost.body_html ? fullPost.body_html : '';
+        if (bodyHtml.trim().length > 0) {
+          fs.writeFileSync(path.join(postsDir, `${id}.${slug}.html`), bodyHtml, 'utf-8');
+          existingIds.add(id);
+          newlySaved++;
+        }
+      }
+    }
+    offset += 50;
+    await sleep(1500);
+  }
+
+  fs.writeFileSync(apiCachePath, JSON.stringify(apiCache, null, 2), 'utf-8');
+  console.log(`Sync complete. New posts saved: ${newlySaved}`);
+  return apiCache;
+}
+
+
+(async () => {
+  const postsDir = 'posts', publicDir = 'public', targetPublicPostsDir = path.join(publicDir, 'posts');
+  if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir, { recursive: true });
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
 
-  let index = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>The Mirror – Static Archive</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background-color: #fafafa; }
-    h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.5rem; color: #000; }
-    .subtitle { color: #666; font-size: 1.1rem; margin-bottom: 2rem; }
-    .post { margin-bottom: 2rem; background: #fff; padding: 2rem; border: 1px solid #e5e5e5; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
-    a { color: #1a1a1a; text-decoration: none; font-weight: 600; }
-    .post h2 a { color: #000; font-size: 1.5rem; font-weight: 700; }
-    .post h2 a:hover { color: #0066cc; }
-    .date { color: #666; font-size: 0.9rem; margin-top: 0.5rem; font-weight: 500; }
-    hr { border: 0; border-top: 1px solid #e5e5e5; margin: 2.5rem 0; }
-  </style>
-</head>
-<body>
-  <h1>The Mirror</h1>
-  <div class="subtitle">Independent static archive of <a href="https://iq2qq.com" style="color:#0066cc;text-decoration:underline;">iq2qq.com</a>. Automatically mirrored from Substack.</div>
-  <hr>
-`;
+  const apiCache = await syncFromSubstackApi(postsDir, 'posts_api.json');
+  const metaById = {}, metaBySlug = {};
 
-  const csvPath = 'posts.csv';
-  let csvIdMap = {};
-  let csvSlugMap = {};
-
-  if (fs.existsSync(csvPath)) {
-    console.log("Loading metadata spreadsheet map...");
-    const csvContent = fs.readFileSync(csvPath, 'utf-8');
-    const records = parseCSV(csvContent);
-    
-    records.forEach(rec => {
-      const cleanDate = new Date(rec.date);
-      if (rec.id) csvIdMap[rec.id] = { title: rec.title, date: cleanDate, slug: rec.slug };
-      if (rec.slug) csvSlugMap[rec.slug.toLowerCase()] = { title: rec.title, date: cleanDate, slug: rec.slug };
-    });
+  if (fs.existsSync('posts.csv')) {
+    for (const rec of parseCSV(fs.readFileSync('posts.csv', 'utf-8'))) {
+      const d = rec.date ? new Date(rec.date) : null;
+      const entry = { title: rec.title, date: d && !isNaN(d.getTime()) ? d : null, slug: rec.slug, section: rec.section || 'Main' };
+      if (rec.id) metaById[rec.id] = entry;
+      if (rec.slug) metaBySlug[rec.slug.toLowerCase()] = entry;
+    }
   }
 
-  const files = fs.readdirSync(postsDir).filter(file => file.endsWith('.html'));
+  for (const [id, item] of Object.entries(apiCache)) {
+    const d = item.date ? new Date(item.date) : null;
+    const ex = metaById[id] || {};
+    const merged = {
+      title: item.title || ex.title || '',
+      date: d && !isNaN(d.getTime()) ? d : ex.date || null,
+      slug: item.slug || ex.slug || '',
+      section: item.section || ex.section || 'Main',
+      canonical_url: item.canonical_url || '',
+    };
+    metaById[id] = merged;
+    if (merged.slug) metaBySlug[merged.slug.toLowerCase()] = merged;
+  }
 
-  if (files.length > 0) {
-    const verifiedChronologicalPosts = [];
+  const seenIds = new Set(), verifiedPosts = [];
+  for (const file of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
+    const filePath = path.join(postsDir, file);
+    const rawHtml = fs.readFileSync(filePath, 'utf-8');
+    if (!rawHtml || !rawHtml.trim()) continue;
 
-    for (const file of files) {
-      const filePath = path.join(postsDir, file);
-      let htmlContent = fs.readFileSync(filePath, 'utf-8');
+    const idMatch = file.match(/^(\d+)\./);
+    const fileId = idMatch ? idMatch[1] : '';
+    const fileSlug = file.replace(/^\d+\./, '').replace(/\.html$/i, '');
+    if (fileId && seenIds.has(fileId)) continue;
+    if (fileId) seenIds.add(fileId);
 
-      // Deactivate Substack backend scripts but allow X frames to run
-      htmlContent = htmlContent.split('<script').join('<!--<script');
-      htmlContent = htmlContent.split('</script>').join('</script>-->');
-      htmlContent = htmlContent.split('<noscript').join('<!--<noscript');
-      htmlContent = htmlContent.split('</noscript>').join('</noscript>-->');
+    const meta = (fileId && metaById[fileId]) || metaBySlug[fileSlug.toLowerCase()] || {};
+    const title = (meta.title || '').trim() || fileSlug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    if (!title) continue;
 
-      let title = file.replace('.html', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-      let pubDate = null;
-      let postSlug = '';
+    let pubDate = meta.date;
+    if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
 
-      let fileNumericId = '';
-      for (let i = 0; i < file.length; i++) {
-        if (file[i] >= '0' && file[i] <= '9') {
-          fileNumericId += file[i];
-        } else if (fileNumericId.length > 0) {
-          break;
-        }
-      }
+    const slug = meta.slug || fileSlug;
+    const section = meta.section || 'Main';
+    const srcLink = meta.canonical_url || (slug ? `${SUBSTACK_BASE}/p/${slug}` : `${SUBSTACK_BASE}/`);
+    const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
-      const fileSlugPart = file.replace('.html', '').toLowerCase();
-
-      if (fileNumericId && csvIdMap[fileNumericId]) {
-        title = csvIdMap[fileNumericId].title;
-        pubDate = csvIdMap[fileNumericId].date;
-        postSlug = csvIdMap[fileNumericId].slug;
-      } else if (csvSlugMap[fileSlugPart]) {
-        title = csvSlugMap[fileSlugPart].title;
-        pubDate = csvSlugMap[fileSlugPart].date;
-        postSlug = csvSlugMap[fileSlugPart].slug;
-      } else {
-        const matchedIdKey = Object.keys(csvIdMap).find(idKey => file.includes(idKey));
-        if (matchedIdKey) {
-          title = csvIdMap[matchedIdKey].title;
-          pubDate = csvIdMap[matchedIdKey].date;
-          postSlug = csvIdMap[matchedIdKey].slug;
-        }
-      }
-
-      // Safe fallback calculations instead of aggressive file skipping
-      if (!pubDate || isNaN(pubDate.getTime())) {
-        const datePrefixMatch = file.match(/^(\d{4}-\d{2}-\d{2})/);
-        pubDate = datePrefixMatch ? new Date(datePrefixMatch) : fs.statSync(filePath).mtime;
-      }
-
-      const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-      const originalSourceLink = postSlug ? `https://://iq2qq.com{postSlug}` : `https://iq2qq.com/`;
-
-      const highFidelityStyles = `
+    const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)} – The Mirror</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 680px; margin: 0 auto; padding: 2rem 1.5rem 6rem 1.5rem; line-height: 1.75; color: #1c1c1e; background-color: #ffffff; -webkit-font-smoothing: antialiased; }
-  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 3rem; font-size: 0.95rem; font-weight: 500; }
-  .archive-header a { color: #0066cc; text-decoration: none; }
-  .post-title { font-size: 2.6rem; font-weight: 700; line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 0.5rem; color: #000000; }
-  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 3rem; font-weight: 500; }
-  .post-meta a { color: #0066cc; text-decoration: underline; }
-  img { max-width: 100%; height: auto; border-radius: 4px; display: block; margin: 2rem auto; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
-  p { margin-bottom: 1.5rem; font-size: 1.1rem; }
-  blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
-  h2, h3, h4 { font-weight: 700; color: #000; margin-top: 2.5rem; margin-bottom: 1rem; line-height: 1.3; }
-  h2 { font-size: 1.6rem; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 6rem; line-height: 1.75; color: #1c1c1e; background: #fff; }
+  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 2.5rem; font-size: 0.95rem; font-weight: 500; }
+  .archive-header a, .post-meta a, .post-body a { color: #0066cc; }
+  .section-pill { display: inline-block; background: #f2f2f7; color: #3a3a3c; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }
+  .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: #000; }
+  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 2.5rem; border-bottom: 1px solid #f2f2f7; padding-bottom: 1.25rem; }
+  .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
+  .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
+  .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
+  .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
+  .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
   .twitter-tweet { margin: 2rem auto !important; }
-</style>
-<script async src="https://twitter.com" charset="utf-8"></script>
-</head>
-<body>
-  <div class="archive-header">
-    <a href="/">← Back to Archive</a>
-    <a href="${originalSourceLink}" target="_blank">View Original Source ↗</a>
-  </div>
-  <h1 class="post-title">${title}</h1>
-  <div class="post-meta">Published on ${displayDate} | Deep link: <a href="${originalSourceLink}" target="_blank">://iq2qq.com{postSlug || ''}</a></div>
-`;
+</style><script async src="https://twitter.com" charset="utf-8"></script></head><body>
+<div class="archive-header"><a href="/">← Back to Full Archive</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a></div>
+<div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1>
+<div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div>
+<article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
 
-      if (htmlContent.includes('</head>')) {
-        htmlContent = htmlContent.replace('</head>', highFidelityStyles);
-      } else {
-        htmlContent = highFidelityStyles + htmlContent;
-      }
-
-      fs.writeFileSync(path.join(targetPublicPostsDir, file), htmlContent);
-      verifiedChronologicalPosts.push({ file, title, pubDate });
-    }
-
-    verifiedChronologicalPosts.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
-
-    for (const post of verifiedChronologicalPosts) {
-      const displayDate = post.pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-      index += `
-  <div class="post">
-    <h2><a href="/posts/${post.file}">${post.title}</a></h2>
-    <div class="date">${displayDate}</div>
-  </div>`;
-    }
+    fs.writeFileSync(path.join(targetPublicPostsDir, file), postPageHtml, 'utf-8');
+    verifiedPosts.push({ file, title, section, timestamp: pubDate.getTime(), displayDate });
   }
 
-  index += `
-  <p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">
-    Last updated: ${new Date().toUTCString()}<br>
-    Powered by GitHub Actions + Cloudflare Pages
-  </p>
-</body>
-</html>`;
+  verifiedPosts.sort((a, b) => b.timestamp - a.timestamp);
+  if (verifiedPosts.length === 0) throw new Error('Aborting build: 0 valid posts compiled.');
 
-  fs.writeFileSync('public/index.html', index);
-  console.log("Archive compiled successfully.");
+  const sectionOptions = Array.from(new Set(verifiedPosts.map((p) => p.section))).sort().map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  const postCardsHtml = verifiedPosts.map((p) => `<div class="post" data-section="${escapeHtml(p.section)}" data-title="${escapeHtml(p.title.toLowerCase())}"><div class="card-meta"><span class="date">${escapeHtml(p.displayDate)}</span><span class="badge">${escapeHtml(p.section)}</span></div><h2><a href="/posts/${encodeURIComponent(p.file)}">${escapeHtml(p.title)}</a></h2></div>`).join('\n');
+
+  const indexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (${verifiedPosts.length} Posts)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background: #fafafa; }
+  h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.4rem; color: #000; }
+  .subtitle { color: #666; font-size: 1.05rem; margin-bottom: 1.5rem; }
+  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .controls input, .controls select { padding: 0.65rem 0.9rem; border: 1px solid #d1d1d6; border-radius: 8px; font-size: 0.95rem; background: #fff; }
+  .controls input { flex: 1; min-width: 220px; }
+  .count { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; font-weight: 500; }
+  .post { margin-bottom: 1.25rem; background: #fff; padding: 1.5rem 1.75rem; border: 1px solid #e5e5e5; border-radius: 8px; }
+  .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+  .date { color: #666; font-size: 0.88rem; }
+  .badge { background: #f2f2f7; color: #3a3a3c; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }
+  .post h2 { margin: 0; font-size: 1.3rem; }
+  .post h2 a { color: #000; text-decoration: none; font-weight: 700; }
+  .post h2 a:hover { color: #0066cc; }
+</style></head><body>
+<h1>The Mirror</h1>
+<div class="subtitle">Complete static archive of <a href="https://iq2qq.com" style="color:#0066cc;">iq2qq.com</a> across all sections.</div>
+<div class="controls"><input type="search" id="searchInput" placeholder="Search ${verifiedPosts.length} archived posts..." oninput="filterPosts()"><select id="sectionFilter" onchange="filterPosts()"><option value="">All Sections</option>${sectionOptions}</select></div>
+<div class="count" id="postCount">Showing ${verifiedPosts.length} posts (newest first)</div>
+<div id="postList">${postCardsHtml}</div>
+<p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">Last updated: ${new Date().toUTCString()}<br>Powered by GitHub Actions + Cloudflare Pages</p>
+<script>function filterPosts(){const q=document.getElementById('searchInput').value.toLowerCase().trim(),sec=document.getElementById('sectionFilter').value,cards=document.querySelectorAll('#postList .post');let v=0;cards.forEach(c=>{const s=(!q||c.dataset.title.includes(q))&&(!sec||c.dataset.section===sec);c.style.display=s?'':'none';if(s)v++;});document.getElementById('postCount').textContent='Showing '+v+' of '+cards.length+' posts (newest first)';}</script>
+</body></html>`;
+
+  fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
+  console.log(`Archive compiled successfully: ${verifiedPosts.length} total posts.`);
 })();
 
 
