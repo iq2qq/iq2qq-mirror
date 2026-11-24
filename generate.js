@@ -277,6 +277,31 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     }
   }
   console.log(`New posts downloaded: ${downloadedCount}`);
+  const sharedThemeScript = `<script>
+    (function() {
+      const saved = localStorage.getItem('mirror-theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const theme = saved || (prefersDark ? 'dark' : 'light');
+      if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    })();
+    function toggleTheme() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('mirror-theme', next);
+      const btn = document.getElementById('themeBtn');
+      if (btn) btn.textContent = next === 'dark' ? '☀️ Light' : '🌙 Dark';
+    }
+    window.addEventListener('DOMContentLoaded', () => {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const btn = document.getElementById('themeBtn');
+      if (btn) btn.textContent = isDark ? '☀️ Light' : '🌙 Dark';
+      if (isDark) {
+        document.querySelectorAll('blockquote.twitter-tweet').forEach(el => el.setAttribute('data-theme', 'dark'));
+      }
+    });
+  </script>`;
+
   const verifiedPosts = [];
   for (const slug of publishedSlugs) {
     const file = existingFilesBySlug[slug];
@@ -284,26 +309,74 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     const filePath = path.join(postsDir, file);
     const rawHtml = fs.readFileSync(filePath, 'utf-8');
     if (!rawHtml || !rawHtml.trim()) continue;
+
     const meta = metaBySlug[slug] || {};
     const title = (meta.title || '').trim() || slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
     if (!title) continue;
+
     let pubDate = meta.date || (sitemapDates[slug] ? new Date(sitemapDates[slug]) : null);
     if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
+
     const section = meta.section || 'Main';
     const srcLink = `${SUBSTACK_BASE}/p/${slug}`;
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-    const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><title>${escapeHtml(title)} – The Mirror</title><style>  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 6rem; line-height: 1.75; color: #1c1c1e; background: #fff; }  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 2.5rem; font-size: 0.95rem; font-weight: 500; }  .archive-header a, .post-meta a, .post-body a { color: #0066cc; }  .section-pill { display: inline-block; background: #f2f2f7; color: #3a3a3c; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }  .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: #000; }  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 2.5rem; border-bottom: 1px solid #f2f2f7; padding-bottom: 1.25rem; }  .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }  .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }  .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }  .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }  .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }  .twitter-tweet { margin: 2rem auto !important; }</style><script async src="https://twitter.com" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a></div><div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1><div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div><article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
+
+    const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><title>${escapeHtml(title)} – The Mirror</title>${sharedThemeScript}<style>
+  :root { --bg: #ffffff; --text: #1c1c1e; --heading: #000000; --muted: #636366; --border: #e5e5ea; --pill-bg: #f2f2f7; --pill-text: #3a3a3c; --accent: #0066cc; --quote-text: #48484a; }
+  [data-theme="dark"] { --bg: #121214; --text: #e5e5ea; --heading: #ffffff; --muted: #98989d; --border: #2c2c2e; --pill-bg: #2c2c2e; --pill-text: #d1d1d6; --accent: #4da3ff; --quote-text: #aeaeb2; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 6rem; line-height: 1.75; color: var(--text); background: var(--bg); transition: background 0.2s, color 0.2s; }
+  .archive-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 2.5rem; font-size: 0.95rem; font-weight: 500; gap: 1rem; flex-wrap: wrap; }
+  .archive-header a, .post-meta a, .post-body a { color: var(--accent); text-decoration: none; }
+  .archive-header a:hover, .post-meta a:hover, .post-body a:hover { text-decoration: underline; }
+  .header-right { display: flex; align-items: center; gap: 1rem; }
+  .theme-btn { background: var(--pill-bg); color: var(--pill-text); border: 1px solid var(--border); padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+  .section-pill { display: inline-block; background: var(--pill-bg); color: var(--pill-text); font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }
+  .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: var(--heading); }
+  .post-meta { font-size: 0.95rem; color: var(--muted); margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+  .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
+  .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
+  .post-body blockquote { border-left: 3px solid var(--heading); padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: var(--quote-text); }
+  .post-body hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
+  .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+  .twitter-tweet { margin: 2rem auto !important; }
+</style><script async src="https://twitter.com" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><div class="header-right"><a href="https://iq2qq.com" target="_blank">About</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a><button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button></div></div><div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1><div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div><article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
+
     fs.writeFileSync(path.join(targetPublicPostsDir, file), postPageHtml, 'utf-8');
     verifiedPosts.push({ file, title, section, timestamp: pubDate.getTime(), displayDate });
   }
+
   verifiedPosts.sort((a, b) => b.timestamp - a.timestamp);
   if (verifiedPosts.length === 0) throw new Error('Aborting build: 0 valid posts compiled.');
+
   const sectionOptions = Array.from(new Set(verifiedPosts.map((p) => p.section))).sort().map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   const postCardsHtml = verifiedPosts.map((p) => `<div class="post" data-section="${escapeHtml(p.section)}" data-title="${escapeHtml(p.title.toLowerCase())}"><div class="card-meta"><span class="date">${escapeHtml(p.displayDate)}</span><span class="badge">${escapeHtml(p.section)}</span></div><h2><a href="/posts/${encodeURIComponent(p.file)}">${escapeHtml(p.title)}</a></h2></div>`).join('\n');
-  const indexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (${verifiedPosts.length} Posts)</title><style>  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background: #fafafa; }  h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.4rem; color: #000; }  .subtitle { color: #666; font-size: 1.05rem; margin-bottom: 1.5rem; }  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }  .controls input, .controls select { padding: 0.65rem 0.9rem; border: 1px solid #d1d1d6; border-radius: 8px; font-size: 0.95rem; background: #fff; }  .controls input { flex: 1; min-width: 220px; }  .count { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; font-weight: 500; }  .post { margin-bottom: 1.25rem; background: #fff; padding: 1.5rem 1.75rem; border: 1px solid #e5e5e5; border-radius: 8px; }  .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }  .date { color: #666; font-size: 0.88rem; }  .badge { background: #f2f2f7; color: #3a3a3c; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }  .post h2 { margin: 0; font-size: 1.3rem; }  .post h2 a { color: #000; text-decoration: none; font-weight: 700; }  .post h2 a:hover { color: #0066cc; }</style></head><body><h1>The Mirror</h1><div class="subtitle">Complete static archive of <a href="https://iq2qq.com" style="color:#0066cc;">iq2qq.com</a> across all sections.</div><div class="controls"><input type="search" id="searchInput" placeholder="Search ${verifiedPosts.length} archived posts..." oninput="filterPosts()"><select id="sectionFilter" onchange="filterPosts()"><option value="">All Sections</option>${sectionOptions}</select></div><div class="count" id="postCount">Showing ${verifiedPosts.length} posts (newest first)</div><div id="postList">${postCardsHtml}</div><p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">Last updated: ${new Date().toUTCString()}<br>Powered by GitHub Actions + Cloudflare Pages</p><script>function filterPosts(){const q=document.getElementById('searchInput').value.toLowerCase().trim(),sec=document.getElementById('sectionFilter').value,cards=document.querySelectorAll('#postList .post');let v=0;cards.forEach(c=>{const s=(!q||c.dataset.title.includes(q))&&(!sec||c.dataset.section===sec);c.style.display=s?'':'none';if(s)v++;});document.getElementById('postCount').textContent='Showing '+v+' of '+cards.length+' posts (newest first)';}</script></body></html>`;
-  fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
-  console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
-})();
+
+  const indexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (${verifiedPosts.length} Posts)</title>${sharedThemeScript}<style>
+  :root { --bg: #fafafa; --card: #ffffff; --text: #151515; --heading: #000000; --muted: #666666; --border: #e5e5e5; --input-border: #d1d1d6; --pill-bg: #f2f2f7; --pill-text: #3a3a3c; --accent: #0066cc; }
+  [data-theme="dark"] { --bg: #121214; --card: #1c1c1e; --text: #e5e5ea; --heading: #ffffff; --muted: #98989d; --border: #2c2c2e; --input-border: #3a3a3c; --pill-bg: #2c2c2e; --pill-text: #d1d1d6; --accent: #4da3ff; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: var(--text); background: var(--bg); transition: background 0.2s, color 0.2s; }
+  .top-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+  h1 { font-size: 2.5rem; font-weight: 700; margin: 0; color: var(--heading); }
+  .nav-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.4rem; }
+  .nav-btn { background: var(--card); color: var(--text); border: 1px solid var(--input-border); padding: 0.45rem 0.85rem; border-radius: 999px; font-size: 0.88rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 0.3rem; }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 1.5rem; }
+  .subtitle a { color: var(--accent); text-decoration: none; }
+  .subtitle a:hover { text-decoration: underline; }
+  .about-drawer { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem 1.75rem; margin-bottom: 1.75rem; line-height: 1.7; }
+  .about-drawer.open { display: block; }
+  .about-drawer h3 { margin: 1.1rem 0 0.35rem; font-size: 0.85rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .about-drawer p { margin: 0 0 0.9rem; font-size: 0.98rem; }
+  .about-footer { margin-top: 1.1rem; padding-top: 0.9rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; font-size: 0.9rem; }
+  .about-footer a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .controls input, .controls select { padding: 0.65rem 0.9rem; border: 1px solid var(--input-border); border-radius: 8px; font-size: 0.95rem; background: var(--card); color: var(--text); }
+  .controls input { flex: 1; min-width: 220px; }
+  .count { font-size: 0.9rem; color: var(--muted); margin-bottom: 1.5rem; font-weight: 500; }
+  .post { margin-bottom: 1.25rem; background: var(--card); padding: 1.5rem 1.75rem; border: 1px solid var(--border); border-radius: 8px; }
+  .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+  .date { color: var(--muted); font-size: 0.88rem; }
 
 
 
