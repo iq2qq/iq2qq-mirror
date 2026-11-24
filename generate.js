@@ -25,7 +25,7 @@ function parseCSV(csvText) {
   if (field.length > 0 || row.length > 0) { row.push(field.trim()); rows.push(row); }
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((h) => h.toLowerCase());
+  const headers = rows.at(0).map((h) => h.toLowerCase());
   const idIdx = headers.findIndex((h) => h === 'post_id' || h.includes('id'));
   const titleIdx = headers.findIndex((h) => h === 'title' || h.includes('title'));
   const dateIdx = headers.findIndex((h) => h === 'post_date' || h.includes('date'));
@@ -35,19 +35,19 @@ function parseCSV(csvText) {
 
   const records = [];
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
+    const r = rows.at(i);
     if (!r || r.length < 2) continue;
-    if (pubIdx >= 0 && String(r[pubIdx]).toLowerCase() === 'false') continue;
-    const rawId = (r[idIdx] || '').trim();
+    if (pubIdx >= 0 && String(r.at(pubIdx)).toLowerCase() === 'false') continue;
+    const rawId = (r.at(idIdx) || '').trim();
     const idMatch = rawId.match(/^(\d+)/);
-    const numericId = idMatch ? idMatch[1] : rawId;
+    const numericId = idMatch ? idMatch.at(1) : rawId;
     const derivedSlug = rawId.includes('.') ? rawId.split('.').slice(1).join('.') : '';
     records.push({
       id: numericId,
-      title: (r[titleIdx] || '').trim(),
-      date: (r[dateIdx] || '').trim(),
-      slug: (slugIdx >= 0 && r[slugIdx] ? r[slugIdx] : derivedSlug).trim(),
-      section: sectionIdx >= 0 ? (r[sectionIdx] || '').trim() : '',
+      title: (r.at(titleIdx) || '').trim(),
+      date: (r.at(dateIdx) || '').trim(),
+      slug: (slugIdx >= 0 && r.at(slugIdx) ? r.at(slugIdx) : derivedSlug).trim(),
+      section: sectionIdx >= 0 ? (r.at(sectionIdx) || '').trim() : '',
     });
   }
   return records;
@@ -94,38 +94,45 @@ function enhanceSubstackEmbeds(html) {
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch) {
+    let tweetUrl = '';
+    block.replace(/data-attrs="([^"]+)"/i, (_, rawAttrs) => {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
-        const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
-        if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
+        const attrs = JSON.parse(decodeEntities(rawAttrs));
+        tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
       } catch (_) {}
+    });
+    if (!tweetUrl) {
+      block.replace(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i, (_, href) => {
+        tweetUrl = href;
+      });
     }
-    const linkMatch = block.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
-    if (linkMatch) return `<blockquote class="twitter-tweet"><a href="${linkMatch[1]}">${linkMatch[1]}</a></blockquote>`;
-    return block;
+    return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
   });
 
   out = replaceDivBlocksByClass(out, /<div[^>]*(?:class="[^"]*youtube[^"]*"|data-component-name="Youtube[^"]*")[^>]*>/i, (block) => {
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch) {
+    let videoId = '';
+    block.replace(/data-attrs="([^"]+)"/i, (_, rawAttrs) => {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
-        const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+        const attrs = JSON.parse(decodeEntities(rawAttrs));
+        videoId = attrs.videoId || attrs.video_id || '';
       } catch (_) {}
+    });
+    if (!videoId) {
+      block.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i, (_, id) => {
+        videoId = id;
+      });
     }
-    const ytMatch = block.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch && ytMatch[1]) {
-      return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
-    }
-    return block;
+    return videoId
+      ? `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
+      : block;
+  });
+
+  out = out.replace(/<iframe[^>]+src="https?:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{11})[^"]*"[^>]*><\/iframe>/gi, (_, videoId) => {
+    return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
   });
 
   return out;
 }
-
 async function fetchTextWithRetry(url, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     const res = await fetch(url, {
@@ -144,17 +151,17 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   let title = '';
   const ogTitle = pageHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-  if (ogTitle) title = decodeEntities(ogTitle[1]).replace(/\s*-\s*by\s+.*$/i, '').trim();
+  if (ogTitle) title = decodeEntities(ogTitle.at(1)).replace(/\s*-\s*by\s+.*$/i, '').trim();
 
   let pubDate = '';
   const timeMatch = pageHtml.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
     || pageHtml.match(/"datePublished"\s*:\s*"([^"]+)"/i);
-  if (timeMatch) pubDate = timeMatch[1].trim();
+  if (timeMatch) pubDate = timeMatch.at(1).trim();
 
   let section = 'Main';
   const secMatch = pageHtml.match(/"section_name"\s*:\s*"([^"]+)"/i);
-  if (secMatch) section = decodeEntities(secMatch[1]).trim();
+  if (secMatch) section = decodeEntities(secMatch.at(1)).trim();
 
   let bodyHtml = '';
   const bodyMarker = pageHtml.indexOf('class="body markup"');
@@ -173,9 +180,10 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   }
 
   const idMatch = pageHtml.match(/"post_id"\s*:\s*(\d+)/i) || pageHtml.match(/data-post-id=["'](\d+)["']/i);
-  const id = idMatch ? idMatch[1] : String(Date.now());
+  const id = idMatch ? idMatch.at(1) : String(Date.now());
   return { id, slug: fallbackSlug, title, date: pubDate, section, bodyHtml };
 }
+
 (async () => {
   const postsDir = 'posts', publicDir = 'public', targetPublicPostsDir = path.join(publicDir, 'posts');
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir, { recursive: true });
@@ -188,17 +196,18 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const sitemapDates = {};
 
   for (const block of urlBlocks) {
-    const loc = (block.match(/<loc>(.*?)<\/loc>/i) || [])[1] || '';
-    const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || [])[1] || '';
+    const locMatch = block.match(/<loc>(.*?)<\/loc>/i);
+    const modMatch = block.match(/<lastmod>(.*?)<\/lastmod>/i);
+    const loc = locMatch ? locMatch.at(1) : '';
+    const lastmod = modMatch ? modMatch.at(1) : '';
     const pMatch = loc.match(/\/p\/([^/?#<]+)/i);
     if (pMatch) {
-      const slug = decodeURIComponent(pMatch[1]).toLowerCase();
+      const slug = decodeURIComponent(pMatch.at(1)).toLowerCase();
       publishedSlugs.add(slug);
       if (lastmod) sitemapDates[slug] = lastmod.trim();
     }
   }
   console.log(`Found ${publishedSlugs.size} published posts in sitemap.xml.`);
-
   const metaBySlug = {};
   if (fs.existsSync('posts.csv')) {
     for (const rec of parseCSV(fs.readFileSync('posts.csv', 'utf-8'))) {
@@ -324,6 +333,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
 
 
 
