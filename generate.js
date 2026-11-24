@@ -111,13 +111,14 @@ function enhanceSubstackEmbeds(html) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(1)));
         const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+        if (videoId) return '<div class="video-embed"><iframe src="https://www.youtube.com' + '/embed/' + videoId + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
       } catch (_) {}
     }
     const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch.at(1)}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+    if (ytMatch) return '<div class="video-embed"><iframe src="https://www.youtube.com' + '/embed/' + ytMatch.at(1) + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
     return block;
   });
+
   return out;
 }
 async function fetchTextWithRetry(url, retries = 3) {
