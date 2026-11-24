@@ -64,12 +64,36 @@ function decodeEntities(str) {
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&#39;/g, "'").replace(/&apos;/g, "'");
 }
+function replaceDivBlocksByClass(html, classRegex, replacer) {
+  let out = html, searchPos = 0;
+  while (true) {
+    const match = out.slice(searchPos).match(classRegex);
+    if (!match) break;
+    const divStart = searchPos + match.index;
+    const openEnd = out.indexOf('>', divStart);
+    if (openEnd === -1) break;
+    let depth = 1, pos = openEnd + 1;
+    while (depth > 0 && pos < out.length) {
+      const nextOpen = out.indexOf('<div', pos);
+      const nextClose = out.indexOf('</div>', pos);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) { depth++; pos = nextOpen + 4; }
+      else { depth--; pos = nextClose + 6; }
+    }
+    const fullBlock = out.slice(divStart, pos);
+    const replacement = replacer(fullBlock);
+    out = out.slice(0, divStart) + replacement + out.slice(pos);
+    searchPos = divStart + replacement.length;
+  }
+  return out;
+}
+
 function enhanceSubstackEmbeds(html) {
   let out = String(html || '');
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
-  out = out.replace(/<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi, (block) => {
+  out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
       try {
@@ -83,17 +107,20 @@ function enhanceSubstackEmbeds(html) {
     return block;
   });
 
-  out = out.replace(/<div[^>]*class="[^"]*\byoutube-wrap\b[^"]*"[^>]*>[\s\S]*?<\/div>/gi, (block) => {
+  out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch[1]));
         const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
+        if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
       } catch (_) {}
     }
+    const ytMatch = block.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+    if (ytMatch) return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
     return block;
   });
+
   return out;
 }
 
