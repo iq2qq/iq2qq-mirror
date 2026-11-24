@@ -93,6 +93,7 @@ function enhanceSubstackEmbeds(html) {
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
+  // 1. Convert Substack tweet blocks into live X/Twitter embeds
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     let tweetUrl = '';
     block.replace(/data-attrs="([^"]+)"/i, (_, rawAttrs) => {
@@ -109,8 +110,9 @@ function enhanceSubstackEmbeds(html) {
     return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
   });
 
-  out = replaceDivBlocksByClass(out, /<div[^>]*(?:class="[^"]*youtube[^"]*"|data-component-name="Youtube[^"]*")[^>]*>/i, (block) => {
-    const decoded = decodeEntities(block);
+  // 2. Direct opening-tag iframe injection for all Substack YouTube wrappers (no </div> counting needed)
+  out = out.replace(/<div\b[^>]*\b(?:youtube-wrap|youtube2|Youtube2ToDOM)\b[^>]*>/gi, (openTag) => {
+    const decoded = decodeEntities(openTag);
     let videoId = '';
     decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{11})"/i, (_, id) => {
       videoId = id;
@@ -120,11 +122,13 @@ function enhanceSubstackEmbeds(html) {
         videoId = id;
       });
     }
-    return videoId
-      ? `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
-      : block;
+    if (videoId) {
+      return `${openTag}<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+    }
+    return openTag;
   });
 
+  // 3. Wrap any standalone YouTube iframes from older posts
   out = out.replace(/<iframe[^>]+src="https?:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{11})[^"]*"[^>]*><\/iframe>/gi, (_, videoId) => {
     return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
   });
@@ -283,6 +287,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
   .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
   .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
+  .youtube-inner, .youtube-screen { display: none !important; }
   .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
   .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
   .twitter-tweet { margin: 2rem auto !important; }
