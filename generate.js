@@ -1,9 +1,8 @@
-
 const fs = require('fs');
 const path = require('path');
 
 const SUBSTACK_BASE = 'https://iq2qq.com';
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const USER_AGENT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function parseCSV(csvText) {
@@ -32,13 +31,16 @@ function parseCSV(csvText) {
   const dateIdx = headers.findIndex((h) => h === 'post_date' || h.includes('date'));
   const slugIdx = headers.findIndex((h) => h === 'slug' || h.includes('slug'));
   const sectionIdx = headers.findIndex((h) => h.includes('section'));
+  const pubIdx = headers.findIndex((h) => h === 'is_published');
 
   const records = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || r.length < 2) continue;
+    if (pubIdx >= 0 && String(r[pubIdx]).toLowerCase() === 'false') continue;
     const rawId = (r[idIdx] || '').trim();
-    const numericId = (rawId.match(/^(\d+)/) || [])[1] || rawId;
+    const idMatch = rawId.match(/^(\d+)/);
+    const numericId = idMatch ? idMatch[1] : rawId;
     const derivedSlug = rawId.includes('.') ? rawId.split('.').slice(1).join('.') : '';
     records.push({
       id: numericId,
@@ -55,6 +57,13 @@ function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function decodeEntities(str) {
+  return String(str || '')
+    .replace(/&quot;/g, '"').replace(/&#34;/g, '"')
+    .replace(/&amp;/g, '&').replace(/&#38;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+}
 function enhanceSubstackEmbeds(html) {
   let out = String(html || '');
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -64,7 +73,7 @@ function enhanceSubstackEmbeds(html) {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
       try {
-        const attrs = JSON.parse(attrMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
         const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
         if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
       } catch (_) {}
@@ -78,7 +87,7 @@ function enhanceSubstackEmbeds(html) {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
       try {
-        const attrs = JSON.parse(attrMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
         const videoId = attrs.videoId || attrs.video_id;
         if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
       } catch (_) {}
@@ -88,132 +97,143 @@ function enhanceSubstackEmbeds(html) {
   return out;
 }
 
-
-async function fetchJsonWithRetry(url, retries = 3) {
+async function fetchTextWithRetry(url, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     const res = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', Referer: `${SUBSTACK_BASE}/archive` },
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
     });
-    if (res.ok) return await res.json();
+    if (res.ok) return await res.text();
     if ((res.status === 429 || res.status >= 500) && attempt < retries) {
       await sleep(attempt * 2000);
       continue;
     }
-    throw new Error(`Substack API failed (${res.status}) for ${url}`);
+    throw new Error(`Fetch failed (${res.status}) for ${url}`);
   }
 }
 
-async function syncFromSubstackApi(postsDir, apiCachePath) {
-  let apiCache = {};
-  if (fs.existsSync(apiCachePath)) {
-    try { apiCache = JSON.parse(fs.readFileSync(apiCachePath, 'utf-8')); } catch (_) {}
-  }
+function extractArticleFromHtml(pageHtml, fallbackSlug) {
+  let title = '';
+  const ogTitle = pageHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
+    || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  if (ogTitle) title = decodeEntities(ogTitle[1]).replace(/\s*-\s*by\s+.*$/i, '').trim();
 
-  const existingIds = new Set();
-  for (const f of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
-    const m = f.match(/^(\d+)\./);
-    if (m) existingIds.add(m[1]);
-  }
+  let pubDate = '';
+  const timeMatch = pageHtml.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
+    || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
+    || pageHtml.match(/"datePublished"\s*:\s*"([^"]+)"/i);
+  if (timeMatch) pubDate = timeMatch[1].trim();
 
-  console.log('Fetching all sections from Substack API...');
-  let offset = 0, newlySaved = 0;
+  let section = 'Main';
+  const secMatch = pageHtml.match(/"section_name"\s*:\s*"([^"]+)"/i);
+  if (secMatch) section = decodeEntities(secMatch[1]).trim();
 
-  while (true) {
-       const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&offset=${offset}&limit=12`);
-
-
-
-
-    for (const item of batch) {
-      const id = String(item.id || '').trim();
-      const slug = String(item.slug || '').trim();
-      const title = String(item.title || '').trim();
-      if (!id || !slug || !title) continue;
-
-      apiCache[id] = {
-        id,
-        slug,
-        title,
-        date: item.post_date || item.published_at || '',
-        section: (item.section && item.section.name) || item.section_name || 'Main',
-        canonical_url: item.canonical_url || `${SUBSTACK_BASE}/p/${slug}`,
-      };
-
-      if (!existingIds.has(id)) {
-        console.log(`Downloading [${id}] ${title}`);
-        await sleep(1200);
-        const fullPost = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/posts/${encodeURIComponent(slug)}`);
-        const bodyHtml = fullPost && fullPost.body_html ? fullPost.body_html : '';
-        if (bodyHtml.trim().length > 0) {
-          fs.writeFileSync(path.join(postsDir, `${id}.${slug}.html`), bodyHtml, 'utf-8');
-          existingIds.add(id);
-          newlySaved++;
-        }
-      }
+  let bodyHtml = '';
+  const bodyMarker = pageHtml.indexOf('class="body markup"');
+  if (bodyMarker !== -1) {
+    const startTag = pageHtml.lastIndexOf('<div', bodyMarker);
+    const contentStart = pageHtml.indexOf('>', startTag) + 1;
+    let depth = 1, pos = contentStart;
+    while (depth > 0 && pos < pageHtml.length) {
+      const nextOpen = pageHtml.indexOf('<div', pos);
+      const nextClose = pageHtml.indexOf('</div>', pos);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) { depth++; pos = nextOpen + 4; }
+      else { depth--; pos = nextClose + 6; }
     }
-    offset += 12;
-    await sleep(1500);
+    bodyHtml = pageHtml.slice(contentStart, pos - 6).trim();
   }
 
-  fs.writeFileSync(apiCachePath, JSON.stringify(apiCache, null, 2), 'utf-8');
-  console.log(`Sync complete. New posts saved: ${newlySaved}`);
-  return apiCache;
+  const idMatch = pageHtml.match(/"post_id"\s*:\s*(\d+)/i) || pageHtml.match(/data-post-id=["'](\d+)["']/i);
+  const id = idMatch ? idMatch[1] : String(Date.now());
+  return { id, slug: fallbackSlug, title, date: pubDate, section, bodyHtml };
 }
-
-
 (async () => {
   const postsDir = 'posts', publicDir = 'public', targetPublicPostsDir = path.join(publicDir, 'posts');
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir, { recursive: true });
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
 
-  const apiCache = await syncFromSubstackApi(postsDir, 'posts_api.json');
-  const metaById = {}, metaBySlug = {};
+  console.log('Fetching Substack sitemap.xml (published posts across all sections)...');
+  const sitemapXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/sitemap.xml`);
+  const urlBlocks = sitemapXml.match(/<url>[\s\S]*?<\/url>/gi) || [];
+  const publishedSlugs = new Set();
+  const sitemapDates = {};
 
+  for (const block of urlBlocks) {
+    const loc = (block.match(/<loc>(.*?)<\/loc>/i) || [])[1] || '';
+    const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || [])[1] || '';
+    const pMatch = loc.match(/\/p\/([^/?#<]+)/i);
+    if (pMatch) {
+      const slug = decodeURIComponent(pMatch[1]).toLowerCase();
+      publishedSlugs.add(slug);
+      if (lastmod) sitemapDates[slug] = lastmod.trim();
+    }
+  }
+  console.log(`Found ${publishedSlugs.size} published posts in sitemap.xml.`);
+
+  const metaBySlug = {};
   if (fs.existsSync('posts.csv')) {
     for (const rec of parseCSV(fs.readFileSync('posts.csv', 'utf-8'))) {
+      if (!rec.slug) continue;
       const d = rec.date ? new Date(rec.date) : null;
-      const entry = { title: rec.title, date: d && !isNaN(d.getTime()) ? d : null, slug: rec.slug, section: rec.section || 'Main' };
-      if (rec.id) metaById[rec.id] = entry;
-      if (rec.slug) metaBySlug[rec.slug.toLowerCase()] = entry;
+      metaBySlug[rec.slug.toLowerCase()] = {
+        id: rec.id,
+        title: rec.title,
+        date: d && !isNaN(d.getTime()) ? d : null,
+        section: rec.section || 'Main',
+      };
     }
   }
 
-  for (const [id, item] of Object.entries(apiCache)) {
-    const d = item.date ? new Date(item.date) : null;
-    const ex = metaById[id] || {};
-    const merged = {
-      title: item.title || ex.title || '',
-      date: d && !isNaN(d.getTime()) ? d : ex.date || null,
-      slug: item.slug || ex.slug || '',
-      section: item.section || ex.section || 'Main',
-      canonical_url: item.canonical_url || '',
-    };
-    metaById[id] = merged;
-    if (merged.slug) metaBySlug[merged.slug.toLowerCase()] = merged;
+  const existingFilesBySlug = {};
+  for (const f of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
+    const s = f.replace(/^\d+\./, '').replace(/\.html$/i, '').toLowerCase();
+    existingFilesBySlug[s] = f;
   }
 
-  const seenIds = new Set(), verifiedPosts = [];
-  for (const file of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
+  let downloadedCount = 0;
+  for (const slug of publishedSlugs) {
+    if (!existingFilesBySlug[slug]) {
+      console.log(`Downloading new published post: ${slug}`);
+      await sleep(1000);
+      try {
+        const html = await fetchTextWithRetry(`${SUBSTACK_BASE}/p/${encodeURIComponent(slug)}`);
+        const art = extractArticleFromHtml(html, slug);
+        if (art.bodyHtml && art.title) {
+          const fname = `${art.id}.${slug}.html`;
+          fs.writeFileSync(path.join(postsDir, fname), art.bodyHtml, 'utf-8');
+          existingFilesBySlug[slug] = fname;
+          metaBySlug[slug] = {
+            id: art.id,
+            title: art.title,
+            date: art.date ? new Date(art.date) : (sitemapDates[slug] ? new Date(sitemapDates[slug]) : new Date()),
+            section: art.section || 'Main',
+          };
+          downloadedCount++;
+        }
+      } catch (err) {
+        console.warn(`Skipped ${slug}: ${err.message}`);
+      }
+    }
+  }
+  console.log(`New posts downloaded: ${downloadedCount}`);
+
+  const verifiedPosts = [];
+  for (const slug of publishedSlugs) {
+    const file = existingFilesBySlug[slug];
+    if (!file) continue;
     const filePath = path.join(postsDir, file);
     const rawHtml = fs.readFileSync(filePath, 'utf-8');
     if (!rawHtml || !rawHtml.trim()) continue;
 
-    const idMatch = file.match(/^(\d+)\./);
-    const fileId = idMatch ? idMatch[1] : '';
-    const fileSlug = file.replace(/^\d+\./, '').replace(/\.html$/i, '');
-    if (fileId && seenIds.has(fileId)) continue;
-    if (fileId) seenIds.add(fileId);
-
-    const meta = (fileId && metaById[fileId]) || metaBySlug[fileSlug.toLowerCase()] || {};
-    const title = (meta.title || '').trim() || fileSlug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+    const meta = metaBySlug[slug] || {};
+    const title = (meta.title || '').trim() || slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
     if (!title) continue;
 
-    let pubDate = meta.date;
+    let pubDate = meta.date || (sitemapDates[slug] ? new Date(sitemapDates[slug]) : null);
     if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
 
-    const slug = meta.slug || fileSlug;
     const section = meta.section || 'Main';
-    const srcLink = meta.canonical_url || (slug ? `${SUBSTACK_BASE}/p/${slug}` : `${SUBSTACK_BASE}/`);
+    const srcLink = `${SUBSTACK_BASE}/p/${slug}`;
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
     const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)} – The Mirror</title>
@@ -273,8 +293,10 @@ async function syncFromSubstackApi(postsDir, apiCachePath) {
 </body></html>`;
 
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
-  console.log(`Archive compiled successfully: ${verifiedPosts.length} total posts.`);
+  console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
+
 
 
 
