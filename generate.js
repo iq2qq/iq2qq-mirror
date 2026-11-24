@@ -5,11 +5,16 @@ const SUBSTACK_BASE = 'https://iq2qq.com';
 const USER_AGENT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function firstGroup(str, regex) {
+  const m = String(str || '').match(regex);
+  return m ? m.slice(1).find(Boolean) || '' : '';
+}
+
 function parseCSV(csvText) {
   const rows = [];
   let row = [], field = '', inQuotes = false;
   for (let i = 0; i < csvText.length; i++) {
-    const ch = csvText[i], next = csvText[i + 1];
+    const ch = csvText.charAt(i), next = csvText.charAt(i + 1);
     if (inQuotes) {
       if (ch === '"' && next === '"') { field += '"'; i++; }
       else if (ch === '"') inQuotes = false;
@@ -25,29 +30,28 @@ function parseCSV(csvText) {
   if (field.length > 0 || row.length > 0) { row.push(field.trim()); rows.push(row); }
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((h) => h.toLowerCase());
-  const idIdx = headers.findIndex((h) => h === 'post_id' || h.includes('id'));
-  const titleIdx = headers.findIndex((h) => h === 'title' || h.includes('title'));
-  const dateIdx = headers.findIndex((h) => h === 'post_date' || h.includes('date'));
-  const slugIdx = headers.findIndex((h) => h === 'slug' || h.includes('slug'));
-  const sectionIdx = headers.findIndex((h) => h.includes('section'));
-  const pubIdx = headers.findIndex((h) => h === 'is_published');
+  const headerRow = rows.shift().map((h) => h.toLowerCase());
+  const idIdx = headerRow.findIndex((h) => h === 'post_id' || h.includes('id'));
+  const titleIdx = headerRow.findIndex((h) => h === 'title' || h.includes('title'));
+  const dateIdx = headerRow.findIndex((h) => h === 'post_date' || h.includes('date'));
+  const slugIdx = headerRow.findIndex((h) => h === 'slug' || h.includes('slug'));
+  const sectionIdx = headerRow.findIndex((h) => h.includes('section'));
+  const pubIdx = headerRow.findIndex((h) => h === 'is_published');
 
   const records = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
+  for (const r of rows) {
     if (!r || r.length < 2) continue;
-    if (pubIdx >= 0 && String(r[pubIdx]).toLowerCase() === 'false') continue;
-    const rawId = (r[idIdx] || '').trim();
-    const idMatch = rawId.match(/^(\d+)/);
-    const numericId = idMatch ? idMatch[1] : rawId;
+    if (pubIdx >= 0 && String(r.at(pubIdx)).toLowerCase() === 'false') continue;
+    const rawId = String(r.at(idIdx) || '').trim();
+    const numericId = firstGroup(rawId, /^(\d+)/) || rawId;
     const derivedSlug = rawId.includes('.') ? rawId.split('.').slice(1).join('.') : '';
+    const slugVal = slugIdx >= 0 && r.at(slugIdx) ? r.at(slugIdx) : derivedSlug;
     records.push({
       id: numericId,
-      title: (r[titleIdx] || '').trim(),
-      date: (r[dateIdx] || '').trim(),
-      slug: (slugIdx >= 0 && r[slugIdx] ? r[slugIdx] : derivedSlug).trim(),
-      section: sectionIdx >= 0 ? (r[sectionIdx] || '').trim() : '',
+      title: String(r.at(titleIdx) || '').trim(),
+      date: String(r.at(dateIdx) || '').trim(),
+      slug: String(slugVal || '').trim(),
+      section: sectionIdx >= 0 ? String(r.at(sectionIdx) || '').trim() : '',
     });
   }
   return records;
@@ -94,31 +98,30 @@ function enhanceSubstackEmbeds(html) {
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch && attrMatch[1]) {
+    const rawAttrs = firstGroup(block, /data-attrs="([^"]+)"/i);
+    if (rawAttrs) {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
+        const attrs = JSON.parse(decodeEntities(rawAttrs));
         const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
         if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
       } catch (_) {}
     }
-    const linkMatch = block.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
-    if (linkMatch && linkMatch[1]) return `<blockquote class="twitter-tweet"><a href="${linkMatch[1]}">${linkMatch[1]}</a></blockquote>`;
+    const tweetLink = firstGroup(block, /href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
+    if (tweetLink) return `<blockquote class="twitter-tweet"><a href="${tweetLink}">${tweetLink}</a></blockquote>`;
     return block;
   });
 
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|-inner|2)?\b[^"]*"[^>]*>/i, (block) => {
     let videoId = '';
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch && attrMatch[1]) {
+    const rawAttrs = firstGroup(block, /data-attrs="([^"]+)"/i);
+    if (rawAttrs) {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch[1]));
+        const attrs = JSON.parse(decodeEntities(rawAttrs));
         videoId = attrs.videoId || attrs.video_id || '';
       } catch (_) {}
     }
     if (!videoId) {
-      const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-      if (ytMatch && ytMatch[1]) videoId = ytMatch[1];
+      videoId = firstGroup(block, /(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
     }
     if (videoId) {
       return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
@@ -144,19 +147,18 @@ async function fetchTextWithRetry(url, retries = 3) {
 
 function extractArticleFromHtml(pageHtml, fallbackSlug) {
   let title = '';
-  const ogTitle = pageHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
-    || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-  if (ogTitle && ogTitle[1]) title = decodeEntities(ogTitle[1]).replace(/\s*-\s*by\s+.*$/i, '').trim();
+  const ogTitle = firstGroup(pageHtml, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
+    || firstGroup(pageHtml, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+  if (ogTitle) title = decodeEntities(ogTitle).replace(/\s*-\s*by\s+.*$/i, '').trim();
 
-  let pubDate = '';
-  const timeMatch = pageHtml.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
-    || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
-    || pageHtml.match(/"datePublished"\s*:\s*"([^"]+)"/i);
-  if (timeMatch && timeMatch[1]) pubDate = timeMatch[1].trim();
+  let pubDate = firstGroup(pageHtml, /<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
+    || firstGroup(pageHtml, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
+    || firstGroup(pageHtml, /"datePublished"\s*:\s*"([^"]+)"/i);
+  pubDate = pubDate.trim();
 
   let section = 'Main';
-  const secMatch = pageHtml.match(/"section_name"\s*:\s*"([^"]+)"/i);
-  if (secMatch && secMatch[1]) section = decodeEntities(secMatch[1]).trim();
+  const secVal = firstGroup(pageHtml, /"section_name"\s*:\s*"([^"]+)"/i);
+  if (secVal) section = decodeEntities(secVal).trim();
 
   let bodyHtml = '';
   const bodyMarker = pageHtml.indexOf('class="body markup"');
@@ -174,8 +176,9 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     bodyHtml = pageHtml.slice(contentStart, pos - 6).trim();
   }
 
-  const idMatch = pageHtml.match(/"post_id"\s*:\s*(\d+)/i) || pageHtml.match(/data-post-id=["'](\d+)["']/i);
-  const id = (idMatch && idMatch[1]) ? idMatch[1] : String(Date.now());
+  const id = firstGroup(pageHtml, /"post_id"\s*:\s*(\d+)/i)
+    || firstGroup(pageHtml, /data-post-id=["'](\d+)["']/i)
+    || String(Date.now());
   return { id, slug: fallbackSlug, title, date: pubDate, section, bodyHtml };
 }
 
@@ -191,11 +194,11 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const sitemapDates = {};
 
   for (const block of urlBlocks) {
-    const loc = (block.match(/<loc>(.*?)<\/loc>/i) || [])[1] || '';
-    const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || [])[1] || '';
-    const pMatch = loc.match(/\/p\/([^/?#<]+)/i);
-    if (pMatch && pMatch[1]) {
-      const slug = decodeURIComponent(pMatch[1]).toLowerCase();
+    const loc = firstGroup(block, /<loc>(.*?)<\/loc>/i);
+    const lastmod = firstGroup(block, /<lastmod>(.*?)<\/lastmod>/i);
+    const rawSlug = firstGroup(loc, /\/p\/([^/?#<]+)/i);
+    if (rawSlug) {
+      const slug = decodeURIComponent(rawSlug).toLowerCase();
       publishedSlugs.add(slug);
       if (lastmod) sitemapDates[slug] = lastmod.trim();
     }
