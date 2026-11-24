@@ -119,7 +119,7 @@ async function syncFromSubstackApi(postsDir, apiCachePath) {
   let offset = 0, newlySaved = 0;
 
   while (true) {
-    const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&search=&offset=${offset}&limit=50`);
+    const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&search=&offset=${offset}&limit=12`);
     if (!Array.isArray(batch) || batch.length === 0) break;
 
     for (const item of batch) {
@@ -149,7 +149,7 @@ async function syncFromSubstackApi(postsDir, apiCachePath) {
         }
       }
     }
-    offset += 50;
+    offset += 12;
     await sleep(1500);
   }
 
