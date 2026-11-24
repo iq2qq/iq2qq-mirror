@@ -95,7 +95,7 @@ function enhanceSubstackEmbeds(html) {
 
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch) {
+    if (attrMatch && attrMatch[1]) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch[1]));
         const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
@@ -103,24 +103,25 @@ function enhanceSubstackEmbeds(html) {
       } catch (_) {}
     }
     const linkMatch = block.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
-    if (linkMatch) return `<blockquote class="twitter-tweet"><a href="${linkMatch[1]}">${linkMatch[1]}</a></blockquote>`;
+    if (linkMatch && linkMatch[1]) return `<blockquote class="twitter-tweet"><a href="${linkMatch[1]}">${linkMatch[1]}</a></blockquote>`;
     return block;
   });
 
-  out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
+  out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|-inner|2)?\b[^"]*"[^>]*>/i, (block) => {
+    let videoId = '';
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
-    if (attrMatch) {
+    if (attrMatch && attrMatch[1]) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch[1]));
-        const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) {
-          return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
-        }
+        videoId = attrs.videoId || attrs.video_id || '';
       } catch (_) {}
     }
-    const ytMatch = block.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) {
-      return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+    if (!videoId) {
+      const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+      if (ytMatch && ytMatch[1]) videoId = ytMatch[1];
+    }
+    if (videoId) {
+      return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
     }
     return block;
   });
@@ -145,17 +146,17 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   let title = '';
   const ogTitle = pageHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
-  if (ogTitle) title = decodeEntities(ogTitle[1]).replace(/\s*-\s*by\s+.*$/i, '').trim();
+  if (ogTitle && ogTitle[1]) title = decodeEntities(ogTitle[1]).replace(/\s*-\s*by\s+.*$/i, '').trim();
 
   let pubDate = '';
   const timeMatch = pageHtml.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
     || pageHtml.match(/"datePublished"\s*:\s*"([^"]+)"/i);
-  if (timeMatch) pubDate = timeMatch[1].trim();
+  if (timeMatch && timeMatch[1]) pubDate = timeMatch[1].trim();
 
   let section = 'Main';
   const secMatch = pageHtml.match(/"section_name"\s*:\s*"([^"]+)"/i);
-  if (secMatch) section = decodeEntities(secMatch[1]).trim();
+  if (secMatch && secMatch[1]) section = decodeEntities(secMatch[1]).trim();
 
   let bodyHtml = '';
   const bodyMarker = pageHtml.indexOf('class="body markup"');
@@ -174,7 +175,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   }
 
   const idMatch = pageHtml.match(/"post_id"\s*:\s*(\d+)/i) || pageHtml.match(/data-post-id=["'](\d+)["']/i);
-  const id = idMatch ? idMatch[1] : String(Date.now());
+  const id = (idMatch && idMatch[1]) ? idMatch[1] : String(Date.now());
   return { id, slug: fallbackSlug, title, date: pubDate, section, bodyHtml };
 }
 
@@ -193,7 +194,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     const loc = (block.match(/<loc>(.*?)<\/loc>/i) || [])[1] || '';
     const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || [])[1] || '';
     const pMatch = loc.match(/\/p\/([^/?#<]+)/i);
-    if (pMatch) {
+    if (pMatch && pMatch[1]) {
       const slug = decodeURIComponent(pMatch[1]).toLowerCase();
       publishedSlugs.add(slug);
       if (lastmod) sitemapDates[slug] = lastmod.trim();
