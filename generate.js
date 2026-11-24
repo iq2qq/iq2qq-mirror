@@ -97,7 +97,7 @@ function enhanceSubstackEmbeds(html) {
     if (attrMatch) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(1)));
-        const tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
+        const tweetUrl = attrs.url || (attrs.id ? 'https://x.com' + '/i/web/status/' + attrs.id : '');
         if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
       } catch (_) {}
     }
@@ -111,14 +111,13 @@ function enhanceSubstackEmbeds(html) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(1)));
         const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return '<div class="video-embed"><iframe src="https://www.youtube.com' + '/embed/' + videoId + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
+        if (videoId) return '<div class="video-embed"><iframe src="https://youtube.com' + '/embed/' + videoId + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
       } catch (_) {}
     }
     const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) return '<div class="video-embed"><iframe src="https://www.youtube.com' + '/embed/' + ytMatch.at(1) + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
+    if (ytMatch) return '<div class="video-embed"><iframe src="https://youtube.com' + '/embed/' + ytMatch.at(1) + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
     return block;
   });
-
   return out;
 }
 async function fetchTextWithRetry(url, retries = 3) {
@@ -176,11 +175,13 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const postsDir = 'posts', publicDir = 'public', targetPublicPostsDir = path.join(publicDir, 'posts');
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir, { recursive: true });
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
+
   console.log('Fetching Substack sitemap.xml (published posts across all sections)...');
   const sitemapXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/sitemap.xml`);
   const urlBlocks = sitemapXml.match(/<url>[\s\S]*?<\/url>/gi) || [];
   const publishedSlugs = new Set();
   const sitemapDates = {};
+
   for (const block of urlBlocks) {
     const loc = (block.match(/<loc>(.*?)<\/loc>/i) || []).at(1) || '';
     const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || []).at(1) || '';
@@ -192,6 +193,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     }
   }
   console.log(`Found ${publishedSlugs.size} published posts in sitemap.xml.`);
+
   const metaBySlug = {};
   if (fs.existsSync('posts.csv')) {
     for (const rec of parseCSV(fs.readFileSync('posts.csv', 'utf-8'))) {
@@ -205,11 +207,48 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       };
     }
   }
+
+  const titleCachePath = 'titles-cache.json';
+  const savedTitles = fs.existsSync(titleCachePath) ? JSON.parse(fs.readFileSync(titleCachePath, 'utf-8')) : {};
+  for (const [s, cached] of Object.entries(savedTitles)) {
+    if (!metaBySlug[s]) {
+      metaBySlug[s] = { id: '', title: cached.title, date: cached.date ? new Date(cached.date) : null, section: cached.section || 'Main' };
+    }
+  }
+
+  try {
+    console.log('Fetching Substack RSS feed for full post titles...');
+    const feedXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/feed`);
+    const items = feedXml.match(/<item>[\s\S]*?<\/item>/gi) || [];
+    for (const item of items) {
+      const link = (item.match(/<link>(.*?)<\/link>/i) || []).at(1) || '';
+      const pMatch = link.match(/\/p\/([^/?#<]+)/i);
+      const rawTitle = (item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/i) || item.match(/<title>([\s\S]*?)<\/title>/i) || []).at(1) || '';
+      const pubStr = (item.match(/<pubDate>(.*?)<\/pubDate>/i) || []).at(1) || '';
+      if (pMatch && rawTitle) {
+        const s = decodeURIComponent(pMatch.at(1)).toLowerCase();
+        const fullTitle = decodeEntities(rawTitle).trim();
+        const existing = metaBySlug[s] || {};
+        metaBySlug[s] = {
+          id: existing.id || '',
+          title: fullTitle,
+          date: existing.date || (pubStr ? new Date(pubStr) : null),
+          section: existing.section || 'Main',
+        };
+        savedTitles[s] = { title: fullTitle, date: metaBySlug[s].date, section: metaBySlug[s].section };
+      }
+    }
+    fs.writeFileSync(titleCachePath, JSON.stringify(savedTitles, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn(`RSS title sync skipped: ${err.message}`);
+  }
+
   const existingFilesBySlug = {};
   for (const f of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
     const s = f.replace(/^\d+\./, '').replace(/\.html$/i, '').toLowerCase();
     existingFilesBySlug[s] = f;
   }
+
   let downloadedCount = 0;
   for (const slug of publishedSlugs) {
     if (!existingFilesBySlug[slug]) {
@@ -228,6 +267,8 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
             date: art.date ? new Date(art.date) : (sitemapDates[slug] ? new Date(sitemapDates[slug]) : new Date()),
             section: art.section || 'Main',
           };
+          savedTitles[slug] = { title: art.title, date: metaBySlug[slug].date, section: art.section || 'Main' };
+          fs.writeFileSync(titleCachePath, JSON.stringify(savedTitles, null, 2), 'utf-8');
           downloadedCount++;
         }
       } catch (err) {
