@@ -319,6 +319,8 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
 
     const section = meta.section || 'Main';
     const srcLink = `${SUBSTACK_BASE}/p/${slug}`;
+    const aboutLink = 'https://iq2qq.com' + '/about';
+    const twitterWidgetsUrl = 'https://twitter.com' + '/widgets.js';
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
     const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><title>${escapeHtml(title)} – The Mirror</title>${sharedThemeScript}<style>
@@ -340,15 +342,15 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
   .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
   .twitter-tweet { margin: 2rem auto !important; }
-</style><script async src="https://twitter.com" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><div class="header-right"><a href="https://iq2qq.com" target="_blank">About</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a><button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button></div></div><div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1><div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div><article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
+</style><script async src="${twitterWidgetsUrl}" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><div class="header-right"><a href="${aboutLink}" target="_blank">About</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a><button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button></div></div><div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1><div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div><article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
 
     fs.writeFileSync(path.join(targetPublicPostsDir, file), postPageHtml, 'utf-8');
     verifiedPosts.push({ file, title, section, timestamp: pubDate.getTime(), displayDate });
   }
-
   verifiedPosts.sort((a, b) => b.timestamp - a.timestamp);
   if (verifiedPosts.length === 0) throw new Error('Aborting build: 0 valid posts compiled.');
 
+  const aboutUrl = 'https://iq2qq.com' + '/about';
   const sectionOptions = Array.from(new Set(verifiedPosts.map((p) => p.section))).sort().map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   const postCardsHtml = verifiedPosts.map((p) => `<div class="post" data-section="${escapeHtml(p.section)}" data-title="${escapeHtml(p.title.toLowerCase())}"><div class="card-meta"><span class="date">${escapeHtml(p.displayDate)}</span><span class="badge">${escapeHtml(p.section)}</span></div><h2><a href="/posts/${encodeURIComponent(p.file)}">${escapeHtml(p.title)}</a></h2></div>`).join('\n');
 
@@ -377,6 +379,16 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .post { margin-bottom: 1.25rem; background: var(--card); padding: 1.5rem 1.75rem; border: 1px solid var(--border); border-radius: 8px; }
   .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
   .date { color: var(--muted); font-size: 0.88rem; }
+  .badge { background: var(--pill-bg); color: var(--pill-text); font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }
+  .post h2 { margin: 0; font-size: 1.3rem; }
+  .post h2 a { color: var(--heading); text-decoration: none; font-weight: 700; }
+  .post h2 a:hover { color: var(--accent); }
+  .footer { margin-top: 4rem; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--border); padding-top: 1.5rem; text-align: center; }
+</style></head><body><div class="top-bar"><h1>The Mirror</h1><div class="nav-actions"><button class="nav-btn" onclick="toggleAbout()">About</button><a class="nav-btn" href="${aboutUrl}" target="_blank">Substack ↗</a><button id="themeBtn" class="nav-btn" onclick="toggleTheme()">🌙 Dark</button></div></div><div class="subtitle">Complete static archive of <a href="${SUBSTACK_BASE}" target="_blank">iq2qq.com</a> across all sections.</div><div id="aboutDrawer" class="about-drawer"><p>There is an urgent need for people to cooperate in resisting engineered challenges and restoring human sovereignty.</p><h3>The Context</h3><p>Institutional overreach and systemic changes have created a need for transparent, unfiltered archives.</p><h3>The Opportunity</h3><p>The Mirror provides a platform to preserve content and transfer access back to readers.</p><div class="about-footer"><span>Reality Revolution · © 2026 777</span><a href="${aboutUrl}" target="_blank">Subscribe &amp; Read Full About Page on Substack ↗</a></div></div><div class="controls"><input type="search" id="searchInput" placeholder="Search ${verifiedPosts.length} archived posts..." oninput="filterPosts()"><select id="sectionFilter" onchange="filterPosts()"><option value="">All Sections</option>${sectionOptions}</select></div><div class="count" id="postCount">Showing ${verifiedPosts.length} posts (newest first)</div><div id="postList">${postCardsHtml}</div><p class="footer">Last updated: ${new Date().toUTCString()}<br>Powered by GitHub Actions + Cloudflare Pages</p><script>function toggleAbout(){document.getElementById('aboutDrawer').classList.toggle('open');}function filterPosts(){const q=document.getElementById('searchInput').value.toLowerCase().trim(),sec=document.getElementById('sectionFilter').value,cards=document.querySelectorAll('#postList .post');let v=0;cards.forEach(c=>{const s=(!q||c.dataset.title.includes(q))&&(!sec||c.dataset.section===sec);c.style.display=s?'':'none';if(s)v++;});document.getElementById('postCount').textContent='Showing '+v+' of '+cards.length+' posts (newest first)';}</script></body></html>`;
+
+  fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
+  console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
+})();
 
 
 
