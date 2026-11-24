@@ -88,6 +88,14 @@ function replaceDivBlocksByClass(html, classRegex, replacer) {
   return out;
 }
 
+function extractYoutubeId(raw) {
+  const decoded = decodeEntities(raw).replace(/\\"/g, '"').replace(/\\\//g, '/');
+  let id = '';
+  decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{8,15})"/i, (_, m) => { id = m; });
+  if (!id) decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|\/vi\/)([a-zA-Z0-9_-]{8,15})/i, (_, m) => { id = m; });
+  return id;
+}
+
 function enhanceSubstackEmbeds(html) {
   let out = String(html || '');
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -110,22 +118,13 @@ function enhanceSubstackEmbeds(html) {
     return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
   });
 
-  // 2. Inject playable YouTube iframe directly before every youtube-wrap container (immune to > inside data-attrs)
-  out = out.replace(/<div\b[^>]*class="[^"]*youtube-wrap[^"]*"[\s\S]{0,4000}/gi, (chunk) => {
-    const decoded = decodeEntities(chunk).replace(/\\"/g, '"');
-    let videoId = '';
-    decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{8,15})"/i, (_, id) => {
-      videoId = id;
-    });
-    if (!videoId) {
-      decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{8,15})/i, (_, id) => {
-        videoId = id;
-      });
-    }
+  // 2. Inject playable YouTube iframe right before any youtube-wrap / youtube2 / Youtube2ToDOM opening tag
+  out = out.replace(/<div\b[^>]*\b(?:youtube-wrap|youtube2|Youtube2ToDOM)\b[^>]*>/gi, (openTag) => {
+    const videoId = extractYoutubeId(openTag);
     if (videoId) {
-      return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>${chunk}`;
+      return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>${openTag}`;
     }
-    return chunk;
+    return openTag;
   });
 
   // 3. Wrap any standalone YouTube iframes from older posts
@@ -339,6 +338,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
 
 
 
