@@ -119,8 +119,10 @@ async function syncFromSubstackApi(postsDir, apiCachePath) {
   let offset = 0, newlySaved = 0;
 
   while (true) {
-    const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&search=&offset=${offset}&limit=12`);
-    if (!Array.isArray(batch) || batch.length === 0) break;
+       const batch = await fetchJsonWithRetry(`${SUBSTACK_BASE}/api/v1/archive?sort=new&offset=${offset}&limit=12`);
+
+
+
 
     for (const item of batch) {
       const id = String(item.id || '').trim();
