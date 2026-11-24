@@ -107,7 +107,7 @@ function enhanceSubstackEmbeds(html) {
     return block;
   });
 
-  out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
+  out = replaceDivBlocksByClass(out, /<div[^>]*(?:class="[^"]*youtube[^"]*"|data-component-name="Youtube[^"]*")[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
       try {
@@ -116,8 +116,10 @@ function enhanceSubstackEmbeds(html) {
         if (videoId) return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
       } catch (_) {}
     }
-    const ytMatch = block.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+    const ytMatch = block.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i);
+    if (ytMatch && ytMatch[1]) {
+      return `<div class="video-embed"><iframe src="https://youtube.com{ytMatch[1]}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+    }
     return block;
   });
 
@@ -322,6 +324,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
 
 
 
