@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SUBSTACK_BASE = 'https://www.iq2qq.com';
+const SUBSTACK_BASE = 'https://iq2qq.com';
 const USER_AGENT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -92,8 +92,12 @@ function extractYoutubeId(raw) {
   const decoded = decodeEntities(raw).replace(/\\"/g, '"').replace(/\\\//g, '/');
   let id = '';
   decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{8,15})"/i, (_, m) => { id = m; });
-  if (!id) decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|\/vi\/)([a-zA-Z0-9_-]{8,15})/i, (_, m) => { id = m; });
+  if (!id) decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|\/vi\/|youtube2-)([a-zA-Z0-9_-]{8,15})/i, (_, m) => { id = m; });
   return id;
+}
+
+function makeYoutubeIframe(videoId) {
+  return '<div class="video-embed"><iframe src="https://youtube.com' + videoId + '" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>';
 }
 
 function enhanceSubstackEmbeds(html) {
@@ -101,13 +105,12 @@ function enhanceSubstackEmbeds(html) {
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
-  // 1. Convert Substack tweet blocks into live X/Twitter embeds
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     let tweetUrl = '';
     block.replace(/data-attrs="([^"]+)"/i, (_, rawAttrs) => {
       try {
         const attrs = JSON.parse(decodeEntities(rawAttrs));
-        tweetUrl = attrs.url || (attrs.id ? `https://x.com{attrs.id}` : '');
+        tweetUrl = attrs.url || (attrs.id ? 'https://x.com' + attrs.id : '');
       } catch (_) {}
     });
     if (!tweetUrl) {
@@ -115,21 +118,16 @@ function enhanceSubstackEmbeds(html) {
         tweetUrl = href;
       });
     }
-    return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
+    return tweetUrl ? '<blockquote class="twitter-tweet"><a href="' + tweetUrl + '">' + tweetUrl + '</a></blockquote>' : block;
   });
 
-  // 2. Inject playable YouTube iframe right before any youtube-wrap / youtube2 / Youtube2ToDOM opening tag
   out = out.replace(/<div\b[^>]*\b(?:youtube-wrap|youtube2|Youtube2ToDOM)\b[^>]*>/gi, (openTag) => {
     const videoId = extractYoutubeId(openTag);
-    if (videoId) {
-      return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>${openTag}`;
-    }
-    return openTag;
+    return videoId ? makeYoutubeIframe(videoId) + openTag : openTag;
   });
 
-  // 3. Wrap any standalone YouTube iframes from older posts
   out = out.replace(/<iframe[^>]+src="https?:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{8,15})[^"]*"[^>]*><\/iframe>/gi, (_, videoId) => {
-    return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+    return makeYoutubeIframe(videoId);
   });
 
   return out;
@@ -144,7 +142,7 @@ async function fetchTextWithRetry(url, retries = 3) {
       await sleep(attempt * 2000);
       continue;
     }
-    throw new Error(`Fetch failed (${res.status}) for ${url}`);
+    throw new Error('Fetch failed (' + res.status + ') for ' + url);
   }
 }
 
@@ -191,7 +189,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
 
   console.log('Fetching Substack sitemap.xml (published posts across all sections)...');
-  const sitemapXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/sitemap.xml`);
+  const sitemapXml = await fetchTextWithRetry(SUBSTACK_BASE + '/sitemap.xml');
   const urlBlocks = sitemapXml.match(/<url>[\s\S]*?<\/url>/gi) || [];
   const publishedSlugs = new Set();
   const sitemapDates = {};
@@ -208,7 +206,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       if (lastmod) sitemapDates[slug] = lastmod.trim();
     }
   }
-  console.log(`Found ${publishedSlugs.size} published posts in sitemap.xml.`);
+  console.log('Found ' + publishedSlugs.size + ' published posts in sitemap.xml.');
   const metaBySlug = {};
   if (fs.existsSync('posts.csv')) {
     for (const rec of parseCSV(fs.readFileSync('posts.csv', 'utf-8'))) {
@@ -235,13 +233,13 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   let downloadedCount = 0;
   for (const slug of publishedSlugs) {
     if (!existingFilesBySlug[slug]) {
-      console.log(`Downloading new published post: ${slug}`);
+      console.log('Downloading new published post: ' + slug);
       await sleep(1000);
       try {
-        const html = await fetchTextWithRetry(`${SUBSTACK_BASE}/p/${encodeURIComponent(slug)}`);
+        const html = await fetchTextWithRetry(SUBSTACK_BASE + '/p/' + encodeURIComponent(slug));
         const art = extractArticleFromHtml(html, slug);
         if (art.bodyHtml && art.title) {
-          const fname = `${art.id}.${slug}.html`;
+          const fname = art.id + '.' + slug + '.html';
           fs.writeFileSync(path.join(postsDir, fname), art.bodyHtml, 'utf-8');
           existingFilesBySlug[slug] = fname;
           metaBySlug[slug] = {
@@ -253,11 +251,11 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
           downloadedCount++;
         }
       } catch (err) {
-        console.warn(`Skipped ${slug}: ${err.message}`);
+        console.warn('Skipped ' + slug + ': ' + err.message);
       }
     }
   }
-  console.log(`New posts downloaded: ${downloadedCount}`);
+  console.log('New posts downloaded: ' + downloadedCount);
 
   const verifiedPosts = [];
   for (const slug of publishedSlugs) {
@@ -275,29 +273,29 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
 
     const section = meta.section || 'Main';
-    const srcLink = `${SUBSTACK_BASE}/p/${slug}`;
+    const srcLink = SUBSTACK_BASE + '/p/' + slug;
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)} – The Mirror</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 6rem; line-height: 1.75; color: #1c1c1e; background: #fff; }
-  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 2.5rem; font-size: 0.95rem; font-weight: 500; }
-  .archive-header a, .post-meta a, .post-body a { color: #0066cc; }
-  .section-pill { display: inline-block; background: #f2f2f7; color: #3a3a3c; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }
-  .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: #000; }
-  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 2.5rem; border-bottom: 1px solid #f2f2f7; padding-bottom: 1.25rem; }
-  .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
-  .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
-  .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
-  .youtube-wrap { display: none !important; }
-  .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
-  .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-  .twitter-tweet { margin: 2rem auto !important; }
-</style><script async src="https://twitter.com" charset="utf-8"></script></head><body>
-<div class="archive-header"><a href="/">← Back to Full Archive</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a></div>
-<div class="section-pill">${escapeHtml(section)}</div><h1 class="post-title">${escapeHtml(title)}</h1>
-<div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div>
-<article class="post-body">${enhanceSubstackEmbeds(rawHtml)}</article></body></html>`;
+    const postPageHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>' + escapeHtml(title) + ' – The Mirror</title>\n' +
+'<style>\n' +
+'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 6rem; line-height: 1.75; color: #1c1c1e; background: #fff; }\n' +
+'  .archive-header { display: flex; justify-content: space-between; border-bottom: 1px solid #e5e5ea; padding-bottom: 1rem; margin-bottom: 2.5rem; font-size: 0.95rem; font-weight: 500; }\n' +
+'  .archive-header a, .post-meta a, .post-body a { color: #0066cc; }\n' +
+'  .section-pill { display: inline-block; background: #f2f2f7; color: #3a3a3c; font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }\n' +
+'  .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: #000; }\n' +
+'  .post-meta { font-size: 0.95rem; color: #636366; margin-bottom: 2.5rem; border-bottom: 1px solid #f2f2f7; padding-bottom: 1.25rem; }\n' +
+'  .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }\n' +
+'  .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }\n' +
+'  .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }\n' +
+'  .youtube-wrap { display: none !important; }\n' +
+'  .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }\n' +
+'  .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }\n' +
+'  .twitter-tweet { margin: 2rem auto !important; }\n' +
+'</style><script async src="https://twitter.com" charset="utf-8"></script></head><body>\n' +
+'<div class="archive-header"><a href="/">← Back to Full Archive</a><a href="' + escapeHtml(srcLink) + '" target="_blank">View on Substack ↗</a></div>\n' +
+'<div class="section-pill">' + escapeHtml(section) + '</div><h1 class="post-title">' + escapeHtml(title) + '</h1>\n' +
+'<div class="post-meta">Published on ' + escapeHtml(displayDate) + ' · <a href="' + escapeHtml(srcLink) + '" target="_blank">' + escapeHtml(srcLink) + '</a></div>\n' +
+'<article class="post-body">' + enhanceSubstackEmbeds(rawHtml) + '</article></body></html>';
 
     fs.writeFileSync(path.join(targetPublicPostsDir, file), postPageHtml, 'utf-8');
     verifiedPosts.push({ file, title, section, timestamp: pubDate.getTime(), displayDate });
@@ -306,37 +304,37 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   verifiedPosts.sort((a, b) => b.timestamp - a.timestamp);
   if (verifiedPosts.length === 0) throw new Error('Aborting build: 0 valid posts compiled.');
 
-  const sectionOptions = Array.from(new Set(verifiedPosts.map((p) => p.section))).sort().map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-  const postCardsHtml = verifiedPosts.map((p) => `<div class="post" data-section="${escapeHtml(p.section)}" data-title="${escapeHtml(p.title.toLowerCase())}"><div class="card-meta"><span class="date">${escapeHtml(p.displayDate)}</span><span class="badge">${escapeHtml(p.section)}</span></div><h2><a href="/posts/${encodeURIComponent(p.file)}">${escapeHtml(p.title)}</a></h2></div>`).join('\n');
+  const sectionOptions = Array.from(new Set(verifiedPosts.map((p) => p.section))).sort().map((s) => '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>').join('');
+  const postCardsHtml = verifiedPosts.map((p) => '<div class="post" data-section="' + escapeHtml(p.section) + '" data-title="' + escapeHtml(p.title.toLowerCase()) + '"><div class="card-meta"><span class="date">' + escapeHtml(p.displayDate) + '</span><span class="badge">' + escapeHtml(p.section) + '</span></div><h2><a href="/posts/' + encodeURIComponent(p.file) + '">' + escapeHtml(p.title) + '</a></h2></div>').join('\n');
 
-  const indexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (${verifiedPosts.length} Posts)</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background: #fafafa; }
-  h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.4rem; color: #000; }
-  .subtitle { color: #666; font-size: 1.05rem; margin-bottom: 1.5rem; }
-  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-  .controls input, .controls select { padding: 0.65rem 0.9rem; border: 1px solid #d1d1d6; border-radius: 8px; font-size: 0.95rem; background: #fff; }
-  .controls input { flex: 1; min-width: 220px; }
-  .count { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; font-weight: 500; }
-  .post { margin-bottom: 1.25rem; background: #fff; padding: 1.5rem 1.75rem; border: 1px solid #e5e5e5; border-radius: 8px; }
-  .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
-  .date { color: #666; font-size: 0.88rem; }
-  .badge { background: #f2f2f7; color: #3a3a3c; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }
-  .post h2 { margin: 0; font-size: 1.3rem; }
-  .post h2 a { color: #000; text-decoration: none; font-weight: 700; }
-  .post h2 a:hover { color: #0066cc; }
-</style></head><body>
-<h1>The Mirror</h1>
-<div class="subtitle">Complete static archive of <a href="https://iq2qq.com" style="color:#0066cc;">iq2qq.com</a> across all sections.</div>
-<div class="controls"><input type="search" id="searchInput" placeholder="Search ${verifiedPosts.length} archived posts..." oninput="filterPosts()"><select id="sectionFilter" onchange="filterPosts()"><option value="">All Sections</option>${sectionOptions}</select></div>
-<div class="count" id="postCount">Showing ${verifiedPosts.length} posts (newest first)</div>
-<div id="postList">${postCardsHtml}</div>
-<p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">Last updated: ${new Date().toUTCString()}<br>Powered by GitHub Actions + Cloudflare Pages</p>
-<script>function filterPosts(){const q=document.getElementById('searchInput').value.toLowerCase().trim(),sec=document.getElementById('sectionFilter').value,cards=document.querySelectorAll('#postList .post');let v=0;cards.forEach(c=>{const s=(!q||c.dataset.title.includes(q))&&(!sec||c.dataset.section===sec);c.style.display=s?'':'none';if(s)v++;});document.getElementById('postCount').textContent='Showing '+v+' of '+cards.length+' posts (newest first)';}</script>
-</body></html>`;
+  const indexHtml = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (' + verifiedPosts.length + ' Posts)</title>\n' +
+'<style>\n' +
+'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; color: #151515; background: #fafafa; }\n' +
+'  h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 0.4rem; color: #000; }\n' +
+'  .subtitle { color: #666; font-size: 1.05rem; margin-bottom: 1.5rem; }\n' +
+'  .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }\n' +
+'  .controls input, .controls select { padding: 0.65rem 0.9rem; border: 1px solid #d1d1d6; border-radius: 8px; font-size: 0.95rem; background: #fff; }\n' +
+'  .controls input { flex: 1; min-width: 220px; }\n' +
+'  .count { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; font-weight: 500; }\n' +
+'  .post { margin-bottom: 1.25rem; background: #fff; padding: 1.5rem 1.75rem; border: 1px solid #e5e5e5; border-radius: 8px; }\n' +
+'  .card-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }\n' +
+'  .date { color: #666; font-size: 0.88rem; }\n' +
+'  .badge { background: #f2f2f7; color: #3a3a3c; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.55rem; border-radius: 999px; }\n' +
+'  .post h2 { margin: 0; font-size: 1.3rem; }\n' +
+'  .post h2 a { color: #000; text-decoration: none; font-weight: 700; }\n' +
+'  .post h2 a:hover { color: #0066cc; }\n' +
+'</style></head><body>\n' +
+'<h1>The Mirror</h1>\n' +
+'<div class="subtitle">Complete static archive of <a href="https://iq2qq.com" style="color:#0066cc;">iq2qq.com</a> across all sections.</div>\n' +
+'<div class="controls"><input type="search" id="searchInput" placeholder="Search ' + verifiedPosts.length + ' archived posts..." oninput="filterPosts()"><select id="sectionFilter" onchange="filterPosts()"><option value="">All Sections</option>' + sectionOptions + '</select></div>\n' +
+'<div class="count" id="postCount">Showing ' + verifiedPosts.length + ' posts (newest first)</div>\n' +
+'<div id="postList">' + postCardsHtml + '</div>\n' +
+'<p style="margin-top:4rem;color:#777;font-size:0.85rem;border-top:1px solid #eee;padding-top:1.5rem;text-align:center;">Last updated: ' + new Date().toUTCString() + '<br>Powered by GitHub Actions + Cloudflare Pages</p>\n' +
+'<script>function filterPosts(){const q=document.getElementById("searchInput").value.toLowerCase().trim(),sec=document.getElementById("sectionFilter").value,cards=document.querySelectorAll("#postList .post");let v=0;cards.forEach(c=>{const s=(!q||c.dataset.title.includes(q))&&(!sec||c.dataset.section===sec);c.style.display=s?"":"none";if(s)v++;});document.getElementById("postCount").textContent="Showing "+v+" of "+cards.length+" posts (newest first)";}</script>\n' +
+'</body></html>';
 
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
-  console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
+  console.log('Archive compiled successfully: ' + verifiedPosts.length + ' published posts.');
 })();
 
 
