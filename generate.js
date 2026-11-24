@@ -110,15 +110,13 @@ function enhanceSubstackEmbeds(html) {
   });
 
   out = replaceDivBlocksByClass(out, /<div[^>]*(?:class="[^"]*youtube[^"]*"|data-component-name="Youtube[^"]*")[^>]*>/i, (block) => {
+    const decoded = decodeEntities(block);
     let videoId = '';
-    block.replace(/data-attrs="([^"]+)"/i, (_, rawAttrs) => {
-      try {
-        const attrs = JSON.parse(decodeEntities(rawAttrs));
-        videoId = attrs.videoId || attrs.video_id || '';
-      } catch (_) {}
+    decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{11})"/i, (_, id) => {
+      videoId = id;
     });
     if (!videoId) {
-      block.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i, (_, id) => {
+      decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i, (_, id) => {
         videoId = id;
       });
     }
@@ -333,6 +331,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
 
 
 
