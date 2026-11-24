@@ -110,15 +110,15 @@ function enhanceSubstackEmbeds(html) {
     return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
   });
 
-  // 2. Direct opening-tag iframe injection for all Substack YouTube wrappers (no </div> counting needed)
+  // 2. Direct opening-tag iframe injection for all Substack YouTube wrappers
   out = out.replace(/<div\b[^>]*\b(?:youtube-wrap|youtube2|Youtube2ToDOM)\b[^>]*>/gi, (openTag) => {
-    const decoded = decodeEntities(openTag);
+    const decoded = decodeEntities(openTag).replace(/\\"/g, '"');
     let videoId = '';
-    decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{11})"/i, (_, id) => {
+    decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{8,15})"/i, (_, id) => {
       videoId = id;
     });
     if (!videoId) {
-      decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{11})/i, (_, id) => {
+      decoded.replace(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/|vi\/)([a-zA-Z0-9_-]{8,15})/i, (_, id) => {
         videoId = id;
       });
     }
@@ -129,7 +129,7 @@ function enhanceSubstackEmbeds(html) {
   });
 
   // 3. Wrap any standalone YouTube iframes from older posts
-  out = out.replace(/<iframe[^>]+src="https?:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{11})[^"]*"[^>]*><\/iframe>/gi, (_, videoId) => {
+  out = out.replace(/<iframe[^>]+src="https?:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{8,15})[^"]*"[^>]*><\/iframe>/gi, (_, videoId) => {
     return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
   });
 
