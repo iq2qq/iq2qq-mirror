@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SUBSTACK_BASE = 'https://iq2qq.com';
+const SUBSTACK_BASE = 'https://www.iq2qq.com';
 const USER_AGENT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -110,9 +110,9 @@ function enhanceSubstackEmbeds(html) {
     return tweetUrl ? `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>` : block;
   });
 
-  // 2. Direct opening-tag iframe injection for all Substack YouTube wrappers
-  out = out.replace(/<div\b[^>]*\b(?:youtube-wrap|youtube2|Youtube2ToDOM)\b[^>]*>/gi, (openTag) => {
-    const decoded = decodeEntities(openTag).replace(/\\"/g, '"');
+  // 2. Inject playable YouTube iframe directly before every youtube-wrap container (immune to > inside data-attrs)
+  out = out.replace(/<div\b[^>]*class="[^"]*youtube-wrap[^"]*"[\s\S]{0,4000}/gi, (chunk) => {
+    const decoded = decodeEntities(chunk).replace(/\\"/g, '"');
     let videoId = '';
     decoded.replace(/"(?:videoId|video_id)"\s*:\s*"([a-zA-Z0-9_-]{8,15})"/i, (_, id) => {
       videoId = id;
@@ -123,9 +123,9 @@ function enhanceSubstackEmbeds(html) {
       });
     }
     if (videoId) {
-      return `${openTag}<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+      return `<div class="video-embed"><iframe src="https://youtube.com{videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>${chunk}`;
     }
-    return openTag;
+    return chunk;
   });
 
   // 3. Wrap any standalone YouTube iframes from older posts
@@ -227,7 +227,10 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const existingFilesBySlug = {};
   for (const f of fs.readdirSync(postsDir).filter((f) => f.endsWith('.html'))) {
     const s = f.replace(/^\d+\./, '').replace(/\.html$/i, '').toLowerCase();
-    existingFilesBySlug[s] = f;
+    const hasNumericId = /^\d+\./.test(f);
+    if (!existingFilesBySlug[s] || hasNumericId) {
+      existingFilesBySlug[s] = f;
+    }
   }
 
   let downloadedCount = 0;
@@ -287,7 +290,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
   .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
   .post-body blockquote { border-left: 3px solid #000; padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: #48484a; }
-  .youtube-inner, .youtube-screen { display: none !important; }
+  .youtube-wrap { display: none !important; }
   .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
   .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
   .twitter-tweet { margin: 2rem auto !important; }
@@ -336,6 +339,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts.`);
 })();
+
 
 
 
