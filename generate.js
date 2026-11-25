@@ -114,7 +114,6 @@ function replaceDivBlocksByClass(html, classRegex, replacer) {
 function sanitizeAndEnhanceHtml(rawHtml) {
   let out = String(rawHtml || '');
 
-  // Extract inner body markup if file is a full HTML export document
   const bodyMarker = out.indexOf('class="body markup"');
   if (bodyMarker !== -1) {
     const startTag = out.lastIndexOf('<div', bodyMarker);
@@ -131,23 +130,20 @@ function sanitizeAndEnhanceHtml(rawHtml) {
   } else {
     out = out.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
     const bodyMatch = out.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    if (bodyMatch) out = bodyMatch;
+    if (bodyMatch) out = bodyMatch.at(1);
   }
 
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
-  // Strip Substack subscribe/footer widgets
   out = replaceDivBlocksByClass(
     out,
     /<div[^>]*class="[^"]*\b(subscription-widget-wrap|subscribe-widget|captioned-button-wrap|post-footer|share-dialog)\b[^"]*"[^>]*>/i,
     () => ''
   );
 
-  // Strip hardcoded background inline styles
   out = out.replace(/\sstyle="[^"]*background(?:-color)?\s*:[^"]*"/gi, '');
 
-  // Clean Twitter/X embeds
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
@@ -162,7 +158,6 @@ function sanitizeAndEnhanceHtml(rawHtml) {
     return block;
   });
 
-  // Clean YouTube embeds
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs="([^"]+)"/i);
     if (attrMatch) {
@@ -196,11 +191,11 @@ async function fetchTextWithRetry(url, retries = 3) {
 
 function extractSectionFromPageHtml(pageHtml) {
   const objMatch = pageHtml.match(/"section"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]+)"/i);
-  if (objMatch) return normalizeSection(objMatch);
+  if (objMatch) return normalizeSection(objMatch.at(1));
   const flatMatch = pageHtml.match(/"section_name"\s*:\s*"([^"]+)"/i);
-  if (flatMatch) return normalizeSection(flatMatch);
+  if (flatMatch) return normalizeSection(flatMatch.at(1));
   const linkMatch = pageHtml.match(/\/s\/([a-z0-9-]+)["'][^>]*>([^<]+)</i);
-  if (linkMatch) return normalizeSection(linkMatch);
+  if (linkMatch) return normalizeSection(linkMatch.at(2));
   return '';
 }
 
@@ -312,7 +307,6 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     console.warn(`RSS sync skipped: ${err.message}`);
   }
 
-  // Paginate through Substack's archive API per section so ALL historical posts get tagged
   console.log('Syncing section assignments across all Substack sections...');
   for (const sec of SECTIONS) {
     let offset = 0;
@@ -471,7 +465,6 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   verifiedPosts.sort((a, b) => b.timestamp - a.timestamp);
   if (verifiedPosts.length === 0) throw new Error('Aborting build: 0 valid posts compiled.');
 
-  // Count posts per section for tab labels
   const sectionCounts = {};
   for (const p of verifiedPosts) {
     if (p.section) sectionCounts[p.section] = (sectionCounts[p.section] || 0) + 1;
@@ -568,6 +561,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts across ${orderedSections.length} sections.`);
 })();
+
 
 
 
