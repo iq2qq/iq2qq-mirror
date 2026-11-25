@@ -59,6 +59,7 @@ function parseCSV(csvText) {
   }
   if (field.length > 0 || row.length > 0) { row.push(field.trim()); rows.push(row); }
   if (rows.length < 2) return [];
+
   const headers = rows.at(0).map((h) => h.toLowerCase());
   const idIdx = headers.findIndex((h) => h === 'post_id' || h.includes('id'));
   const titleIdx = headers.findIndex((h) => h === 'title' || h.includes('title'));
@@ -66,6 +67,7 @@ function parseCSV(csvText) {
   const slugIdx = headers.findIndex((h) => h === 'slug' || h.includes('slug'));
   const sectionIdx = headers.findIndex((h) => h.includes('section'));
   const pubIdx = headers.findIndex((h) => h === 'is_published');
+
   const records = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows.at(i);
@@ -111,6 +113,7 @@ function replaceDivBlocksByClass(html, classRegex, replacer) {
 
 function sanitizeAndEnhanceHtml(rawHtml) {
   let out = String(rawHtml || '');
+
   const bodyMarker = out.indexOf('class="body markup"');
   if (bodyMarker !== -1) {
     const startTag = out.lastIndexOf('<div', bodyMarker);
@@ -129,14 +132,18 @@ function sanitizeAndEnhanceHtml(rawHtml) {
     const bodyMatch = out.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
     if (bodyMatch) out = bodyMatch.at(1);
   }
+
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
+
   out = replaceDivBlocksByClass(
     out,
     /<div[^>]*class="[^"]*\b(subscription-widget-wrap|subscribe-widget|captioned-button-wrap|post-footer|share-dialog)\b[^"]*"[^>]*>/i,
     () => ''
   );
+
   out = out.replace(/\sstyle="[^"]*background(?:-color)?\s*:[^"]*"/gi, '');
+
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
@@ -151,30 +158,29 @@ function sanitizeAndEnhanceHtml(rawHtml) {
     return block;
   });
 
-  const makeLiteYoutube = (videoId) => {
-    const thumbMax = `https://ytimg.com{videoId}/maxresdefault.jpg`;
-    const thumbHq = `https://ytimg.com{videoId}/hqdefault.jpg`;
-    return `<div class="video-embed lite-yt" data-vid="${videoId}" onclick="activateYt(this)">` +
-      `<img src="${thumbMax}" onerror="this.onerror=null;this.src='${thumbHq}';" alt="YouTube video thumbnail" loading="lazy">` +
-      `<button type="button" class="yt-play-btn" aria-label="Play video"></button>` +
-      `</div>`;
-  };
-
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(2)));
         const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return makeLiteYoutube(videoId);
+        if (videoId) {
+          const embedSrc = ['https://youtube.com', 'embed', videoId].join('/');
+          return `<div class="video-embed"><iframe src="${embedSrc}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+        }
       } catch (_) {}
     }
     const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) return makeLiteYoutube(ytMatch.at(1));
+    if (ytMatch) {
+      const embedSrc = ['https://youtube.com', 'embed', ytMatch.at(1)].join('/');
+      return `<div class="video-embed"><iframe src="${embedSrc}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+    }
     return block;
   });
+
   return out;
 }
+
 async function fetchTextWithRetry(url, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     const res = await fetch(url, {
@@ -204,12 +210,15 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const ogTitle = pageHtml.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
   if (ogTitle) title = decodeEntities(ogTitle.at(1)).replace(/\s*-\s*by\s+.*$/i, '').trim();
+
   let pubDate = '';
   const timeMatch = pageHtml.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)
     || pageHtml.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)
     || pageHtml.match(/"datePublished"\s*:\s*"([^"]+)"/i);
   if (timeMatch) pubDate = timeMatch.at(1).trim();
+
   const section = extractSectionFromPageHtml(pageHtml);
+
   let bodyHtml = '';
   const bodyMarker = pageHtml.indexOf('class="body markup"');
   if (bodyMarker !== -1) {
@@ -225,11 +234,11 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     }
     bodyHtml = pageHtml.slice(contentStart, pos - 6).trim();
   }
+
   const idMatch = pageHtml.match(/"post_id"\s*:\s*(\d+)/i) || pageHtml.match(/data-post-id=["'](\d+)["']/i);
   const id = idMatch ? idMatch.at(1) : String(Date.now());
   return { id, slug: fallbackSlug, title, date: pubDate, section, bodyHtml };
 }
-
 (async () => {
   const postsDir = 'posts', publicDir = 'public', targetPublicPostsDir = path.join(publicDir, 'posts');
   if (!fs.existsSync(postsDir)) fs.mkdirSync(postsDir, { recursive: true });
@@ -240,6 +249,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   const urlBlocks = sitemapXml.match(/<url>[\s\S]*?<\/url>/gi) || [];
   const publishedSlugs = new Set();
   const sitemapDates = {};
+
   for (const block of urlBlocks) {
     const loc = (block.match(/<loc>(.*?)<\/loc>/i) || []).at(1) || '';
     const lastmod = (block.match(/<lastmod>(.*?)<\/lastmod>/i) || []).at(1) || '';
@@ -302,6 +312,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   } catch (err) {
     console.warn(`RSS sync skipped: ${err.message}`);
   }
+
   console.log('Syncing section assignments across all Substack sections...');
   for (const sec of SECTIONS) {
     let offset = 0;
@@ -312,6 +323,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
         const jsonText = await fetchTextWithRetry(apiUrl);
         const posts = JSON.parse(jsonText);
         if (!Array.isArray(posts) || posts.length === 0) break;
+
         for (const p of posts) {
           if (!p.slug) continue;
           const pSlug = String(p.slug).toLowerCase();
@@ -328,6 +340,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
             section: sec.name,
           };
         }
+
         if (posts.length < limit) break;
         offset += limit;
         await sleep(300);
@@ -380,9 +393,9 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       }
     }
   }
+
   fs.writeFileSync(titleCachePath, JSON.stringify(savedTitles, null, 2), 'utf-8');
   console.log(`New posts downloaded: ${downloadedCount}`);
-
   const sharedThemeScript = `<script>
     (function() {
       const saved = localStorage.getItem('mirror-theme');
@@ -398,13 +411,6 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       const btn = document.getElementById('themeBtn');
       if (btn) btn.textContent = next === 'dark' ? '☀️ Light' : '🌙 Dark';
     }
-    function activateYt(el) {
-      const vid = el.dataset.vid;
-      if (!vid) return;
-      el.onclick = null;
-      el.style.cursor = 'default';
-      el.innerHTML = '<iframe src="https://youtube.com' + vid + '?autoplay=1" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
-    }
     window.addEventListener('DOMContentLoaded', () => {
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const btn = document.getElementById('themeBtn');
@@ -414,6 +420,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       }
     });
   </script>`;
+
   const verifiedPosts = [];
   for (const slug of publishedSlugs) {
     const file = existingFilesBySlug[slug];
@@ -421,17 +428,21 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     const filePath = path.join(postsDir, file);
     const rawHtml = fs.readFileSync(filePath, 'utf-8');
     if (!rawHtml || !rawHtml.trim()) continue;
+
     const meta = metaBySlug[slug] || {};
     const title = (meta.title || '').trim() || slug.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
     if (!title) continue;
+
     let pubDate = meta.date || (sitemapDates[slug] ? new Date(sitemapDates[slug]) : null);
     if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
+
     const section = normalizeSection(meta.section);
     const srcLink = [SUBSTACK_BASE, 'p', slug].join('/');
     const aboutLink = [SUBSTACK_BASE, 'about'].join('/');
     const twitterWidgetsUrl = ['https://twitter.com', 'widgets.js'].join('/');
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
     const pillHtml = section ? `<div class="section-pill">${escapeHtml(section)}</div>` : '';
+
     const postPageHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="referrer" content="strict-origin-when-cross-origin"><title>${escapeHtml(title)} – The Mirror</title>${sharedThemeScript}<style>
   :root { --bg: #ffffff; --text: #1c1c1e; --heading: #000000; --muted: #636366; --border: #e5e5ea; --pill-bg: #f2f2f7; --pill-text: #3a3a3c; --accent: #0066cc; --quote-text: #48484a; }
   [data-theme="dark"] { --bg: #121214; --text: #e5e5ea; --heading: #ffffff; --muted: #98989d; --border: #2c2c2e; --pill-bg: #2c2c2e; --pill-text: #d1d1d6; --accent: #4da3ff; --quote-text: #aeaeb2; }
@@ -451,13 +462,9 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .post-body hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
   .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
   .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-  .lite-yt { cursor: pointer; background: #000; }
-  .lite-yt img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; margin: 0 !important; border-radius: 0 !important; }
-  .yt-play-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 68px; height: 48px; background: rgba(33, 33, 33, 0.85); border: 0; border-radius: 12px; cursor: pointer; transition: background 0.15s; }
-  .lite-yt:hover .yt-play-btn { background: #ff0000; }
-  .yt-play-btn::before { content: ""; position: absolute; top: 50%; left: 52%; transform: translate(-50%, -50%); border-style: solid; border-width: 10px 0 10px 18px; border-color: transparent transparent transparent #fff; }
   .twitter-tweet { margin: 2rem auto !important; }
 </style><script async src="${twitterWidgetsUrl}" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><div class="header-right"><a href="${aboutLink}" target="_blank">About</a><a href="${escapeHtml(srcLink)}" target="_blank">View on Substack ↗</a><button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button></div></div>${pillHtml}<h1 class="post-title">${escapeHtml(title)}</h1><div class="post-meta">Published on ${escapeHtml(displayDate)} · <a href="${escapeHtml(srcLink)}" target="_blank">${escapeHtml(srcLink)}</a></div><article class="post-body">${sanitizeAndEnhanceHtml(rawHtml)}</article></body></html>`;
+
     fs.writeFileSync(path.join(targetPublicPostsDir, file), postPageHtml, 'utf-8');
     verifiedPosts.push({ file, title, section, timestamp: pubDate.getTime(), displayDate });
   }
@@ -468,6 +475,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   for (const p of verifiedPosts) {
     if (p.section) sectionCounts[p.section] = (sectionCounts[p.section] || 0) + 1;
   }
+
   const knownNames = SECTIONS.map((s) => s.name);
   const orderedSections = [
     ...knownNames.filter((name) => sectionCounts[name] > 0),
@@ -553,7 +561,8 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       const label = activeSection ? ' in ' + activeSection : '';
       document.getElementById('postCount').textContent = 'Showing ' + v + ' of ' + cards.length + ' posts' + label + ' (newest first)';
     }
-  </script></body></html>`;
+  </script>
+</body></html>`;
 
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts across ${orderedSections.length} sections.`);
