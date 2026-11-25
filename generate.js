@@ -114,6 +114,7 @@ function replaceDivBlocksByClass(html, classRegex, replacer) {
 function sanitizeAndEnhanceHtml(rawHtml) {
   let out = String(rawHtml || '');
 
+  // If file is a full HTML export document, unwrap just the article body
   const bodyMarker = out.indexOf('class="body markup"');
   if (bodyMarker !== -1) {
     const startTag = out.lastIndexOf('<div', bodyMarker);
@@ -136,19 +137,22 @@ function sanitizeAndEnhanceHtml(rawHtml) {
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
+  // Strip Substack subscribe/footer widgets from exported HTML
   out = replaceDivBlocksByClass(
     out,
     /<div[^>]*class="[^"]*\b(subscription-widget-wrap|subscribe-widget|captioned-button-wrap|post-footer|share-dialog)\b[^"]*"[^>]*>/i,
     () => ''
   );
 
+  // Strip hardcoded white background inline styles
   out = out.replace(/\sstyle="[^"]*background(?:-color)?\s*:[^"]*"/gi, '');
 
+  // Master-script Twitter/X embed converter
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
+    const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch.at(1)));
+        const attrs = JSON.parse(decodeEntities(attrMatch.at(2)));
         const tweetUrl = attrs.url || (attrs.id ? 'https://x.com' + attrs.id : '');
         if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
       } catch (_) {}
@@ -158,11 +162,12 @@ function sanitizeAndEnhanceHtml(rawHtml) {
     return block;
   });
 
+  // Master-script YouTube embed converter (with single/double quote support)
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
-    const attrMatch = block.match(/data-attrs="([^"]+)"/i);
+    const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
       try {
-        const attrs = JSON.parse(decodeEntities(attrMatch.at(1)));
+        const attrs = JSON.parse(decodeEntities(attrMatch.at(2)));
         const videoId = attrs.videoId || attrs.video_id;
         if (videoId) return '<div class="video-embed"><iframe src="https://youtube.com' + videoId + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
       } catch (_) {}
@@ -449,7 +454,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   .section-pill { display: inline-block; background: var(--pill-bg); color: var(--pill-text); font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.65rem; border-radius: 999px; margin-bottom: 0.75rem; text-transform: uppercase; }
   .post-title { font-size: 2.4rem; font-weight: 700; line-height: 1.18; margin: 0 0 0.75rem; color: var(--heading); }
   .post-meta { font-size: 0.95rem; color: var(--muted); margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
-  .post-body, .post-body div, .post-body section { background-color: transparent !important; color: inherit !important; }
+  .post-body, .post-body div:not(.video-embed), .post-body section { background-color: transparent !important; color: inherit !important; }
   .post-body img, .post-body video, .post-body figure { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 1.75rem auto; }
   .post-body p { margin-bottom: 1.4rem; font-size: 1.1rem; }
   .post-body blockquote { border-left: 3px solid var(--heading); padding-left: 1.25rem; margin: 2rem 0; font-style: italic; color: var(--quote-text); }
