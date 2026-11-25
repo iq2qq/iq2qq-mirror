@@ -9,7 +9,7 @@ const SECTIONS = [
   { name: 'Rogue State', slug: 'rogue-state' },
   { name: '1984', slug: '1984' },
   { name: 'Q-Keys', slug: 'q-and-keys' },
-  { name: 'Important Issues & Events', slug: 'important-issues-and-events' },
+  { name: 'Important Issues & Events', slug: 'key-issues-and-events' },
   { name: 'OWO', slug: 'owo' },
   { name: 'Epstein', slug: 'epstein' },
   { name: 'MSM Watch', slug: 'msm-watch' },
