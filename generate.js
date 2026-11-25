@@ -114,7 +114,6 @@ function replaceDivBlocksByClass(html, classRegex, replacer) {
 function sanitizeAndEnhanceHtml(rawHtml) {
   let out = String(rawHtml || '');
 
-  // If file is a full HTML export document, unwrap just the article body
   const bodyMarker = out.indexOf('class="body markup"');
   if (bodyMarker !== -1) {
     const startTag = out.lastIndexOf('<div', bodyMarker);
@@ -137,23 +136,20 @@ function sanitizeAndEnhanceHtml(rawHtml) {
   out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   out = out.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
 
-  // Strip Substack subscribe/footer widgets from exported HTML
   out = replaceDivBlocksByClass(
     out,
     /<div[^>]*class="[^"]*\b(subscription-widget-wrap|subscribe-widget|captioned-button-wrap|post-footer|share-dialog)\b[^"]*"[^>]*>/i,
     () => ''
   );
 
-  // Strip hardcoded white background inline styles
   out = out.replace(/\sstyle="[^"]*background(?:-color)?\s*:[^"]*"/gi, '');
 
-  // Master-script Twitter/X embed converter
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\btweet\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(2)));
-        const tweetUrl = attrs.url || (attrs.id ? 'https://x.com' + attrs.id : '');
+        const tweetUrl = attrs.url || (attrs.id ? ['https://x.com', 'i', 'web', 'status', attrs.id].join('/') : '');
         if (tweetUrl) return `<blockquote class="twitter-tweet"><a href="${tweetUrl}">${tweetUrl}</a></blockquote>`;
       } catch (_) {}
     }
@@ -162,18 +158,23 @@ function sanitizeAndEnhanceHtml(rawHtml) {
     return block;
   });
 
-  // Master-script YouTube embed converter (with single/double quote support)
   out = replaceDivBlocksByClass(out, /<div[^>]*class="[^"]*\byoutube(?:-wrap|2)?\b[^"]*"[^>]*>/i, (block) => {
     const attrMatch = block.match(/data-attrs=(["'])([\s\S]*?)\1/i);
     if (attrMatch) {
       try {
         const attrs = JSON.parse(decodeEntities(attrMatch.at(2)));
         const videoId = attrs.videoId || attrs.video_id;
-        if (videoId) return '<div class="video-embed"><iframe src="https://youtube.com' + videoId + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
+        if (videoId) {
+          const embedSrc = ['https://youtube.com', 'embed', videoId].join('/');
+          return `<div class="video-embed"><iframe src="${embedSrc}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+        }
       } catch (_) {}
     }
-    const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
-    if (ytMatch) return '<div class="video-embed"><iframe src="https://youtube.com' + ytMatch.at(1) + '" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>';
+    const ytMatch = block.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+    if (ytMatch) {
+      const embedSrc = ['https://youtube.com', 'embed', ytMatch.at(1)].join('/');
+      return `<div class="video-embed"><iframe src="${embedSrc}" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy"></iframe></div>`;
+    }
     return block;
   });
 
@@ -244,7 +245,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   if (!fs.existsSync(targetPublicPostsDir)) fs.mkdirSync(targetPublicPostsDir, { recursive: true });
 
   console.log('Fetching Substack sitemap.xml...');
-  const sitemapXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/sitemap.xml`);
+  const sitemapXml = await fetchTextWithRetry([SUBSTACK_BASE, 'sitemap.xml'].join('/'));
   const urlBlocks = sitemapXml.match(/<url>[\s\S]*?<\/url>/gi) || [];
   const publishedSlugs = new Set();
   const sitemapDates = {};
@@ -288,7 +289,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
 
   try {
     console.log('Fetching Substack RSS feed...');
-    const feedXml = await fetchTextWithRetry(`${SUBSTACK_BASE}/feed`);
+    const feedXml = await fetchTextWithRetry([SUBSTACK_BASE, 'feed'].join('/'));
     const items = feedXml.match(/<item>[\s\S]*?<\/item>/gi) || [];
     for (const item of items) {
       const link = (item.match(/<link>(.*?)<\/link>/i) || []).at(1) || '';
@@ -345,7 +346,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
         await sleep(300);
       } catch (err) {
         try {
-          const secHtml = await fetchTextWithRetry(`${SUBSTACK_BASE}/s/${sec.slug}`);
+          const secHtml = await fetchTextWithRetry([SUBSTACK_BASE, 's', sec.slug].join('/'));
           const postLinks = secHtml.match(/\/p\/([a-z0-9-]+)/gi) || [];
           for (const pl of postLinks) {
             const pSlug = pl.replace(/^\/p\//i, '').toLowerCase();
@@ -371,7 +372,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
       console.log(`Downloading new post: ${slug}`);
       await sleep(1000);
       try {
-        const html = await fetchTextWithRetry(`${SUBSTACK_BASE}/p/${encodeURIComponent(slug)}`);
+        const html = await fetchTextWithRetry([SUBSTACK_BASE, 'p', encodeURIComponent(slug)].join('/'));
         const art = extractArticleFromHtml(html, slug);
         if (art.bodyHtml && art.title) {
           const fname = `${art.id}.${slug}.html`;
@@ -436,9 +437,9 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     if (!pubDate || isNaN(pubDate.getTime())) pubDate = fs.statSync(filePath).mtime;
 
     const section = normalizeSection(meta.section);
-    const srcLink = `${SUBSTACK_BASE}/p/${slug}`;
-    const aboutLink = 'https://iq2qq.com';
-    const twitterWidgetsUrl = 'https://twitter.com';
+    const srcLink = [SUBSTACK_BASE, 'p', slug].join('/');
+    const aboutLink = [SUBSTACK_BASE, 'about'].join('/');
+    const twitterWidgetsUrl = ['https://twitter.com', 'widgets.js'].join('/');
     const displayDate = pubDate.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
     const pillHtml = section ? `<div class="section-pill">${escapeHtml(section)}</div>` : '';
 
@@ -496,7 +497,7 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
     )
     .join('\n');
 
-  const aboutUrl = 'https://iq2qq.com';
+  const aboutUrl = [SUBSTACK_BASE, 'about'].join('/');
   const qBadge = '<svg width="14" height="14" viewBox="0 0 24 24" style="vertical-align:-2px;display:inline-block;" aria-label="Q"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="2.2"/><text x="12" y="15.8" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="13.5" font-weight="700" fill="currentColor">Q</text></svg>';
 
   const indexHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>The Mirror – Complete Static Archive (${verifiedPosts.length} Posts)</title>${sharedThemeScript}<style>
@@ -566,34 +567,3 @@ function extractArticleFromHtml(pageHtml, fallbackSlug) {
   fs.writeFileSync(path.join(publicDir, 'index.html'), indexHtml, 'utf-8');
   console.log(`Archive compiled successfully: ${verifiedPosts.length} published posts across ${orderedSections.length} sections.`);
 })();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
