@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECTIONS = [
   { name: 'Rogue State', slug: 'rogue-state' },
   { name: '1984', slug: '1984' },
-  { name: 'Q-Keys', slug: 'q-keys' },
+  { name: 'Q-Keys', slug: 'q-and-keys' },
   { name: 'Important Issues & Events', slug: 'important-issues-and-events' },
   { name: 'OWO', slug: 'owo' },
   { name: 'Epstein', slug: 'epstein' },
