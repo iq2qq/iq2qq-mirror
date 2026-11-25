@@ -13,13 +13,6 @@
       const btn = document.getElementById('themeBtn');
       if (btn) btn.textContent = next === 'dark' ? '☀️ Light' : '🌙 Dark';
     }
-    function activateYt(el) {
-      const vid = el.dataset.vid;
-      if (!vid) return;
-      el.onclick = null;
-      el.style.cursor = 'default';
-      el.innerHTML = '<iframe src="https://youtube.com' + vid + '?autoplay=1" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
-    }
     window.addEventListener('DOMContentLoaded', () => {
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const btn = document.getElementById('themeBtn');
@@ -690,7 +683,7 @@
 <div class="post" data-section="" data-title="atma: beyond the speed of mind - reincarnated: eternal boundlessness (track 17):"><div class="card-meta"><span class="date">6 March 2025</span></div><h2><a href="/posts/185958712.atma-beyond-the-speed-of-mind-reincarnated-eternal-boundlessness-track-17.html">Atma: Beyond the Speed of Mind - Reincarnated: Eternal Boundlessness (Track 17):</a></h2></div>
 <div class="post" data-section="" data-title="luke 17"><div class="card-meta"><span class="date">6 March 2025</span></div><h2><a href="/posts/185958710.luke-17.html">Luke 17</a></h2></div>
 <div class="post" data-section="" data-title="atma: beyond the speed of mind - reincarnated: who feels it knows it:"><div class="card-meta"><span class="date">6 March 2025</span></div><h2><a href="/posts/185958709.atma-beyond-the-speed-of-mind-reincarnated-who-feels-it-knows-it.html">Atma: Beyond the Speed of Mind - Reincarnated: Who Feels It Knows It:</a></h2></div></div>
-  <p class="footer">Last updated: Wed, 25 Nov 2026 19:45:36 GMT<br>Powered by GitHub Actions + Cloudflare Pages</p>
+  <p class="footer">Last updated: Wed, 25 Nov 2026 19:52:10 GMT<br>Powered by GitHub Actions + Cloudflare Pages</p>
   <script>
     let activeSection = '';
     function toggleAbout() { document.getElementById('aboutDrawer').classList.toggle('open'); }
@@ -712,4 +705,5 @@
       const label = activeSection ? ' in ' + activeSection : '';
       document.getElementById('postCount').textContent = 'Showing ' + v + ' of ' + cards.length + ' posts' + label + ' (newest first)';
     }
-  </script></body></html>
+  </script>
+</body></html>

@@ -13,13 +13,6 @@
       const btn = document.getElementById('themeBtn');
       if (btn) btn.textContent = next === 'dark' ? '☀️ Light' : '🌙 Dark';
     }
-    function activateYt(el) {
-      const vid = el.dataset.vid;
-      if (!vid) return;
-      el.onclick = null;
-      el.style.cursor = 'default';
-      el.innerHTML = '<iframe src="https://youtube.com' + vid + '?autoplay=1" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
-    }
     window.addEventListener('DOMContentLoaded', () => {
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const btn = document.getElementById('themeBtn');
@@ -47,10 +40,5 @@
   .post-body hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
   .video-embed { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; margin: 2rem 0; border-radius: 8px; }
   .video-embed iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-  .lite-yt { cursor: pointer; background: #000; }
-  .lite-yt img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; margin: 0 !important; border-radius: 0 !important; }
-  .yt-play-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 68px; height: 48px; background: rgba(33, 33, 33, 0.85); border: 0; border-radius: 12px; cursor: pointer; transition: background 0.15s; }
-  .lite-yt:hover .yt-play-btn { background: #ff0000; }
-  .yt-play-btn::before { content: ""; position: absolute; top: 50%; left: 52%; transform: translate(-50%, -50%); border-style: solid; border-width: 10px 0 10px 18px; border-color: transparent transparent transparent #fff; }
   .twitter-tweet { margin: 2rem auto !important; }
 </style><script async src="https://twitter.com/widgets.js" charset="utf-8"></script></head><body><div class="archive-header"><a href="/">← Back to Full Archive</a><div class="header-right"><a href="https://iq2qq.com/about" target="_blank">About</a><a href="https://iq2qq.com/p/reuters-poland-arrests-ukrainian-woman-convicted-of-selling-56-human-kidneys" target="_blank">View on Substack ↗</a><button id="themeBtn" class="theme-btn" onclick="toggleTheme()">🌙 Dark</button></div></div><h1 class="post-title">Reuters: Poland arrests Ukrainian woman convicted of selling 56 human kidneys:</h1><div class="post-meta">Published on 12 March 2025 · <a href="https://iq2qq.com/p/reuters-poland-arrests-ukrainian-woman-convicted-of-selling-56-human-kidneys" target="_blank">https://iq2qq.com/p/reuters-poland-arrests-ukrainian-woman-convicted-of-selling-56-human-kidneys</a></div><article class="post-body"><p>"Polish border guards detained a Ukrainian woman who was sentenced in Kazakhstan to 12 years in prison for participating in an organised criminal group trading in human organs and selling 56 kidneys, prosecutors said on Tuesday...":</p><p><a href="https://www.reuters.com/world/europe/poland-arrests-ukrainian-woman-convicted-selling-56-human-kidneys-2025-03-11/">https://www.reuters.com/world/europe/poland-arrests-ukrainian-woman-convicted-selling-56-human-kidneys-2025-03-11/</a></p><p><strong>New Europe (2011): Ukraine: European capital for illegal organ transplants:</strong></p><p>"EU and Ukraine authorities are struggling to keep a thriving, yet truly problematic, business under control. Due to Ukraine's lack of medical infrastructure and non-existent legislation to perform vital transplant organs, illegal trade in human organs is booming as desperate people are turning more and more to the black market seeking for solution. The lucrative trade involves from the shipping of bones, kidneys, livers and intestines to unlawfully extracting stem cells from newborns..."</p><p><a href="https://www.neweurope.eu/article/ukraine-european-capital-illegal-organ-transplants/">https://www.neweurope.eu/article/ukraine-european-capital-illegal-organ-transplants/</a></p><p><a href="https://archive.ph/ePaeg">https://archive.ph/ePaeg</a></p><p><strong>BBC (2005): Ukraine baby theft claims probed:</strong></p><p>"<strong>Harrowing reports of babies stolen at birth and human organ removal in an Ukrainian city are to be investigated by a top European political body</strong>...</p><p>Underlining real concern over baby-trafficking from Eastern Europe, they pointed to newspaper adverts in Moldova encouraging single mothers there to sell a child for 3,000 euros....</p><p>...remains in the grave had allegedly had their organs and brains removed.</p><p>"They were like gutted rabbits,"...":</p><p>http://news.bbc.co.uk/1/hi/world/europe/4189558.stm</p></article></body></html>
